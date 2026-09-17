@@ -46,6 +46,22 @@ Each result contains typed option scores, timing, the exact model revision, and 
 
 If every row has the same exact state, switch to `--mode shared` to prefill it once and evaluate the criteria in parallel.
 
+## FlyForge stack (OpenJev + Evolution Lab)
+
+**Clone openjev first.** This repo sets up the runtime: typed JEV decisions, optional SLM
+scorers, and Route A/B tooling. When you want to **evolve** fly-style specialists (Hermes
+recovery, JEV routing heads), add [Evolution Lab](https://github.com/kvnloo/evolution-lab)
+on top — it orchestrates genomes, locked splits, promotion, and DAgger; OpenJev remains the
+inference substrate.
+
+```bash
+bash scripts/setup-flyforge.sh
+# → installs OpenJev, clones evolution-lab @ nightly, locks splits, prints smoke commands
+```
+
+See [docs/evolution-lab.md](docs/evolution-lab.md) for the full contract (Track A recovery fly,
+Track B JEV heads, export paths, token-saving stack).
+
 ## Route A: trainable scorers (jevlike port)
 
 When zero-shot direct readout is not enough, train a small one-pass option head on labelled JSONL
@@ -135,6 +151,7 @@ Returned probabilities are conditional on the supplied options. Calibrate and va
 
 ## Documentation
 
+- [Evolution Lab integration](docs/evolution-lab.md) — FlyForge setup, evolve fly specialists, deploy winners
 - [Results](docs/RESULTS.md) — quality, speed, perturbations, and claim boundaries
 - [Method](docs/METHOD.md) — frozen prompts, metrics, and timing scope
 - [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
