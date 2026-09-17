@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openjev-phase1"
-version = "0.1.0"
+version = "0.2.0"
 description = "Open baselines for runtime-defined semantic decisions"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -23,10 +23,24 @@ dependencies = [
 
 [project.scripts]
 openjev-score = "openjev_phase1.cli:main"
-
+openjev-data = "openjev_phase1.jevlike.data:main"
+openjev-train = "openjev_phase1.jevlike.train:main"
+openjev-eval = "openjev_phase1.jevlike.eval:main"
+openjev-predict = "openjev_phase1.jevlike.predict:main"
+openjev-bridge-score = "openjev_phase1.jevlike.bridge:main"
+jevlike-data = "openjev_phase1.jevlike.data:main"
+jevlike-train = "openjev_phase1.jevlike.train:main"
+jevlike-eval = "openjev_phase1.jevlike.eval:main"
+jevlike-predict = "openjev_phase1.jevlike.predict:main"
 [project.optional-dependencies]
 test = ["pytest==8.4.2"]
-
+games = [
+  "chess>=1.11",
+  "imageio>=2.37",
+  "imageio-ffmpeg>=0.6",
+  "pillow>=11",
+  "vizdoom>=1.2.4",
+]
 [tool.setuptools.packages.find]
 where = ["src"]
 

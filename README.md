@@ -46,6 +46,22 @@ Each result contains typed option scores, timing, the exact model revision, and 
 
 If every row has the same exact state, switch to `--mode shared` to prefill it once and evaluate the criteria in parallel.
 
+## Route A: trainable scorers (jevlike port)
+
+When zero-shot direct readout is not enough, train a small one-pass option head on labelled JSONL
+(ported from [jevlike](https://github.com/vinnylarouge/jevlike), MIT):
+
+```bash
+pip install -e '.[test]'
+openjev-data synthetic --output data/synthetic
+openjev-train data/synthetic/train.jsonl --validation data/synthetic/validation.jsonl \
+  --output runs/synthetic.pt --device cuda
+openjev-eval runs/synthetic.pt data/synthetic/test.jsonl
+```
+
+See [docs/jevlike-trainable-route.md](docs/jevlike-trainable-route.md) for frozen-encoder training,
+Wikispeedia, visual Doom/Chess examples (`pip install -e '.[games]'`), and bridge scoring.
+
 ## How it works
 
 ```mermaid
