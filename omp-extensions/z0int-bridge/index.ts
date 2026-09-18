@@ -311,6 +311,13 @@ async function closeOpenTurn(opts: {
 	const last = readLast();
 	const traceId = opts.traceId || (last && typeof last.trace_id === "string" ? last.trace_id : null);
 	if (!traceId) return { ok: false, error: "no_open_trace" };
+	if (last && last.trace_id === traceId && last.closed === true) {
+		return { ok: true, already_closed: true, trace_id: traceId };
+	}
+	if (closingTraces.has(traceId)) {
+		return { ok: true, already_closed: true, trace_id: traceId };
+	}
+	closingTraces.add(traceId);
 
 	const args = [
 		"-m",
