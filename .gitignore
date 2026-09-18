@@ -7,3 +7,5 @@ reranker-results*.jsonl
 models/
 cache/
 *.egg-info/
+.z0int/
+data/private/

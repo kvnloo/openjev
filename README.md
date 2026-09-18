@@ -288,6 +288,7 @@ Details: [docs/vllm-diffusion-route.md](docs/vllm-diffusion-route.md).
 ## Repository map
 
 - [ROADMAP.md](ROADMAP.md) - long-term z0int build order
+- [docs/RESEARCH.md](docs/RESEARCH.md) - durable research context and critical path
 - [docs/evolution-lab.md](docs/evolution-lab.md) - FlyForge / Evolution Lab contract
 - [docs/RESULTS.md](docs/RESULTS.md) - measured OpenJev results
 - [docs/METHOD.md](docs/METHOD.md) - frozen evaluation methodology
