@@ -1353,13 +1353,16 @@ DONE (2026-09-17, evolution-lab nightly b9e4db5)
   10. gpu-abab: A mutates DataRecipe, B trains P=256, keep iff GPU>ridge+1pp and majority
       8 waves, 2 keeps (wave 4 n=16384; wave 5 full split).
 
-NOW / DONE (2026-09-17 session resume)
-  9. shadow in live harness using wave-5 champion pack; Jev only on ambiguous cases
+NOW / DONE (2026-09-17 safe coverage)
+  9. shadow + confidence/abstain cascade on wave-5 champion
      - wave-5 pack locked: n_kc=96 k_winners=20 pn_dim=64 confirm=0.572 (beats ridge 0.363)
      - promote-only writes: weaker GPU runs no longer clobber `data/next_action/champion.*`
-     - CLI: `next-action-confirm` (offline confirm), `next-action-shadow` (append row)
-     - OMP extension `flyforge-jev`: before_agent_start log-only cascade to `~/.z0int/shadow/jev-fly.jsonl`
-  persist data/next_action/champion.json + runs/gpu-evolve/next_action_champion.npz
+     - CLI: `next-action-confirm`, `next-action-shadow`, `next-action-decide`, `next-action-coverage`
+     - policy `data/next_action/coverage_policy.json`: high-conf EXECUTE (p≥0.60, margin≥0.30) and
+       DELEGATE (p≥0.40) → local; else escalate → Jev (fallback OpenJev)
+     - confirm coverage eval: cov≈0.196, local_prec≈0.669 (EXEC n=2931 prec≈0.664; DEL n=81 prec≈0.864)
+     - OMP extension `flyforge-jev`: log-only cascade rows → `~/.z0int/shadow/jev-fly.jsonl`
+  persist data/next_action/champion.{npz,json} + coverage_policy.json
 
 LATER
   11. Memento / FlyGym
