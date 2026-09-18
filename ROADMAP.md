@@ -45,7 +45,25 @@ Success means the frontier LLM receives **less irrelevant context**, performs **
 
 ---
 
-## P0 - preserve the measured OpenJev foundation
+## P0 - GPU population evolution (new critical path)
+
+**Status: next implementation**
+
+Use local GPU (RTX 3080 Ti) as a massive parallel search engine for tiny mushroom-body / fly candidates. Do not use it to speed up a single 640-weight inference.
+
+1. Add `local_jax` backend reproducing current `local_plasticity` in `float32`.
+2. Parity against CPU on locked Evolution Lab recovery splits.
+3. `vmap` over population `P`; scale until VRAM or throughput saturates.
+4. GPU filters; **frozen CPU judge** serial-rebenches before keep.
+5. Record joules/verified candidate via NVML when available.
+
+vLLM SLM teacher/fallback is a parallel lane, not a substitute.
+
+Then continue P0 OpenJev substrate preservation below.
+
+---
+
+## P0b - preserve the measured OpenJev foundation
 
 **Status: existing substrate**
 

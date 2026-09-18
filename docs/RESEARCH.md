@@ -1336,6 +1336,39 @@ Hard gates:
 
 # 28. Current critical path
 
+**GPU first.** Use the 3080 Ti as a *population* engine for tiny policies, not a faster executor for one 640-weight fly. One mushroom-body forward pass is launch-overhead-bound; thousands of candidates × episodes is what the GPU is for.
+
+```text
+NOW
+  1. local_jax backend — exact mushroom algorithm in jnp.float32
+  2. parity: CPU local_plasticity ≈ GPU local_jax on locked recovery seeds
+  3. population batch P = 256 → 1,024 → 4,096 → 16,384 (shared frozen PN→KC)
+  4. GPU cheap-filter → frozen CPU judge (serial rebench before keep)
+  5. measure candidate-gen/s, GPU util, VRAM, joules/verified candidate (NVML)
+
+PARALLEL
+  6. vLLM SLM as Jev-like semantic teacher/fallback (do not GPU-ify the judge)
+
+THEN
+  7. compile Hermes/OMP histories into next-action episodes
+  8. ridge/MLP vs mushroom-body vs GPU population on that task
+  9. shadow in live harness; Jev only on ambiguous cases
+  10. ABAB mutates dataset recipe + architecture (not the judge)
+  11. Memento / FlyGym later
+```
+
+Do **not** start with FlyGym, full MaleCNS hot-path, or a 5B SLM as the fly executor.
+
+Weights scale (151 PN × 96 KC + 96×5 MBON ≈ 15k floats ≈ 58 KB/fly FP32): 10k flies ≈ 0.6 GB weights. Incremental cost collapses if PN→KC is shared.
+
+Judge stays CPU/frozen. GPU proposes; serial rebench promotes.
+
+---
+
+# 28b. Personalization path (kept, second)
+
+The previous shortest path to useful personalized learning remains, *under* GPU evolution:
+
 The current shortest path to useful personalized learning is:
 
 ```text
