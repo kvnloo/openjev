@@ -17,10 +17,10 @@ from z0int.specialists.next_operator import fit_recency_prior, predict, safe_cov
 
 class OperatorVocabTests(unittest.TestCase):
     def test_normalize(self):
-        self.assertEqual(normalize_operator("switch_app"), "SWITCH_APP")
-        self.assertEqual(normalize_operator("noop"), "NOOP")
-        self.assertEqual(normalize_operator("stay"), "NOOP")
-        self.assertIn("TEST", OPERATOR_FAMILIES)
+        self.assertEqual(normalize_operator("switch_app"), "open_context")
+        self.assertEqual(normalize_operator("noop"), "noop")
+        self.assertEqual(normalize_operator("stay"), "noop")
+        self.assertIn("inspect_result", OPERATOR_FAMILIES)
 
     def test_compile_rejects_open_episode(self):
         self.assertIsNone(compile_episode({"closed": 0, "state_before_json": "{}"}))
@@ -41,7 +41,7 @@ class OperatorVocabTests(unittest.TestCase):
         )
         assert ep is not None
         self.assertEqual(ep["schema"], "os.context_episode.v0")
-        self.assertEqual(ep["actual_operator"], "SWITCH_APP")
+        self.assertEqual(ep["actual_operator"], "open_context")
         self.assertEqual(ep["state_before"]["app"], "kitty")
         self.assertNotIn("title", ep["state_before"])
         # label must not appear inside feature blob keys as actual_operator
@@ -98,28 +98,40 @@ class ImportDbTests(unittest.TestCase):
                 out = import_from_db(db_path=db, limit=10)
             self.assertTrue(out["ok"])
             self.assertEqual(out["episodes"], 1)
-            self.assertEqual(out["operator_histogram"].get("SWITCH_APP"), 1)
+            self.assertEqual(out["operator_histogram"].get("open_context"), 1)
 
 
 class NextOperatorShadowTests(unittest.TestCase):
     def test_safe_coverage_runs(self):
         eps = [
             {
-                "state_before": {"app": "kitty", "project": "z0intelligence"},
-                "actual_operator": "TEST",
+                "state_before": {
+                    "app": "kitty",
+                    "project": "z0intelligence",
+                    "harness_state": "completed",
+                },
+                "actual_operator": "inspect_result",
             },
             {
-                "state_before": {"app": "kitty", "project": "z0intelligence"},
-                "actual_operator": "TEST",
+                "state_before": {
+                    "app": "kitty",
+                    "project": "z0intelligence",
+                    "harness_state": "completed",
+                },
+                "actual_operator": "inspect_result",
             },
             {
                 "state_before": {"app": "zen", "project": "other"},
-                "actual_operator": "BROWSER",
+                "actual_operator": "open_context",
             },
         ]
         model = fit_recency_prior(eps)
-        pred = predict({"app": "kitty", "project": "z0intelligence"}, model)
-        self.assertEqual(pred["top1"], "TEST")
+        pred = predict(
+            {"app": "kitty", "project": "z0intelligence", "harness_state": "completed"},
+            model,
+        )
+        self.assertEqual(pred["top1"], "inspect_result")
+        self.assertEqual(pred["gate"], "PREDICT")
         cov = safe_coverage(eps, model, precision_floor=0.5, min_p=0.1)
         self.assertGreaterEqual(cov["n"], 3)
         self.assertIn("coverage", cov)

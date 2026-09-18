@@ -31,44 +31,56 @@ SCHEMA_SHADOW = "os.next_context.v0"
 SCHEMA_OPERATOR = "os.next_operator.v0"
 SCHEMA_BUNDLE = "z0int.os_episode_bundle.v1"
 
-# Bounded operator vocabulary (flagship specialist). Hierarchical refine later.
+# Flow os.next_operator.v0 vocabulary (inspect_result first).
+# Hierarchical refine later; do not invent free-text labels.
 OPERATOR_FAMILIES = (
-    "READ",
-    "SEARCH",
-    "EDIT",
-    "TEST",
-    "SHELL",
-    "BROWSER",
-    "SWITCH_APP",
-    "OPEN_FILE",
-    "NAVIGATE",
-    "COPY",
-    "PASTE",
-    "WAIT",
-    "VERIFY",
-    "DELEGATE",
-    "NOOP",
-    "OTHER",
+    "inspect_result",
+    "resume_previous",
+    "open_context",
+    "retrieve",
+    "run_test",
+    "delegate",
+    "noop",
 )
 
-# Map workspace-copilot action_family → operator vocab
+# Map workspace-copilot action_family / legacy labels → Flow operator vocab
 _FAMILY_MAP = {
-    "switch_app": "SWITCH_APP",
-    "open_file": "OPEN_FILE",
-    "navigate": "NAVIGATE",
-    "read": "READ",
-    "search": "SEARCH",
-    "edit": "EDIT",
-    "test": "TEST",
-    "shell": "SHELL",
-    "browser": "BROWSER",
-    "copy": "COPY",
-    "paste": "PASTE",
-    "wait": "WAIT",
-    "verify": "VERIFY",
-    "delegate": "DELEGATE",
-    "noop": "NOOP",
-    "stay": "NOOP",
+    "inspect_result": "inspect_result",
+    "harness": "inspect_result",
+    "resume_previous": "resume_previous",
+    "open_context": "open_context",
+    "switch_app": "open_context",
+    "switch_workspace": "open_context",
+    "switch_pane": "open_context",
+    "switch_project": "open_context",
+    "open_file": "open_context",
+    "navigate": "open_context",
+    "retrieve": "retrieve",
+    "search": "retrieve",
+    "read": "retrieve",
+    "run_test": "run_test",
+    "test": "run_test",
+    "verify": "run_test",
+    "delegate": "delegate",
+    "noop": "noop",
+    "stay": "noop",
+    # legacy uppercase z0int labels
+    "SWITCH_APP": "open_context",
+    "OPEN_FILE": "open_context",
+    "NAVIGATE": "open_context",
+    "READ": "retrieve",
+    "SEARCH": "retrieve",
+    "EDIT": "open_context",
+    "TEST": "run_test",
+    "SHELL": "open_context",
+    "BROWSER": "open_context",
+    "COPY": "open_context",
+    "PASTE": "open_context",
+    "WAIT": "noop",
+    "VERIFY": "run_test",
+    "DELEGATE": "delegate",
+    "NOOP": "noop",
+    "OTHER": "open_context",
 }
 
 
@@ -96,14 +108,21 @@ def _json_load(raw: object) -> Any:
 
 def normalize_operator(family: str | None, *, target: str | None = None) -> str:
     if not family:
-        return "OTHER"
-    key = str(family).strip().lower()
+        return "open_context"
+    raw = str(family).strip()
+    if raw in _FAMILY_MAP:
+        return _FAMILY_MAP[raw]
+    key = raw.lower()
     if key in _FAMILY_MAP:
         return _FAMILY_MAP[key]
-    upper = str(family).strip().upper()
-    if upper in OPERATOR_FAMILIES:
-        return upper
-    return "OTHER"
+    if raw in OPERATOR_FAMILIES:
+        return raw
+    if key in OPERATOR_FAMILIES:
+        return key
+    # harness terminal targets often land as completed/waiting labels
+    if key in {"completed", "waiting", "blocked", "failed"}:
+        return "inspect_result"
+    return "open_context"
 
 
 def _sanitize_state(state: dict[str, Any]) -> dict[str, Any]:

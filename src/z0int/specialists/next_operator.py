@@ -50,9 +50,7 @@ def fit_recency_prior(episodes: list[dict[str, Any]]) -> dict[str, Any]:
     counts: dict[tuple[str, ...], Counter[str]] = defaultdict(Counter)
     global_counts: Counter[str] = Counter()
     for ep in episodes:
-        op = ep.get("actual_operator") or "OTHER"
-        if op not in OPERATOR_FAMILIES:
-            op = normalize_operator(op)
+        op = normalize_operator(ep.get("actual_operator") or "noop")
         feat = _feat(ep.get("state_before") or {})
         counts[feat][op] += 1
         global_counts[op] += 1
