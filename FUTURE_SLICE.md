@@ -98,3 +98,21 @@ Routine Compiler + Cascade Compiler now compile to HOTL/AODL 0.2 without extendi
 
 See `docs/aodl-integration.md`, `src/z0int/aodl.py`, and `examples/aodl/routine-cascade.json`.
 
+
+## ABAB meta-loop hardening
+
+The future branch now codifies the Frontier KB research discipline in `src/z0int/abab.py`, `credit.py`, and
+`battery.py`:
+
+- 2-sigma sealed credit rather than point-estimate keeps;
+- paired non-inferiority for cascade vs frontier baseline;
+- explicit validity -> activation -> credit gates;
+- evolver-blind sealed scoring interfaces;
+- Phase-0 calibration on known-good/known-bad controls;
+- Pareto/MAP-Elites niche archive + separate learned-only front;
+- negative-result / killed-hypothesis retention;
+- EIG-weighted experiment priority and C-stage discriminating tests;
+- cost-per-credit and no-update stop rules;
+- AODL hot-plane refusal of uncredited strategies (shadow remains explicit).
+
+See `docs/abab-loop.md`.

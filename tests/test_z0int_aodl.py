@@ -242,6 +242,22 @@ class AodlBindingTests(unittest.TestCase):
         assert slot is not None
         self.assertEqual(slot[0], "stage-specialist")
 
+    def test_hot_plane_refuses_uncredited_cascade_unless_explicit_shadow(self) -> None:
+        candidate = replace(self.cascade(), status="candidate")
+        with self.assertRaises(ValueError):
+            compile_aodl(
+                capability_id="coding.needs_verification",
+                cascade=candidate,
+            )
+        shadow = compile_aodl(
+            capability_id="coding.needs_verification",
+            cascade=candidate,
+            config=AodlBindingConfig(allow_uncredited_shadow=True),
+        )
+        self.assertEqual(shadow["plan"]["deployment"]["mode"], "shadow")
+        self.assertFalse(shadow["plan"]["deployment"]["trafficEligible"])
+        self.assertEqual(shadow["plan"]["deployment"]["creditStatus"], "candidate")
+
     def test_unknown_or_control_room_harness_fails_closed(self) -> None:
         with self.assertRaises(ValueError):
             AodlBindingConfig(harness_id="o8")

@@ -103,6 +103,7 @@ class AodlBindingConfig:
     stage_bindings: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     stage_roles: Mapping[str, str] = field(default_factory=dict)
     include_routine_slot: bool = True
+    allow_uncredited_shadow: bool = False
     source: str = "z0int"
 
     def __post_init__(self) -> None:
@@ -312,6 +313,12 @@ def compile_aodl(
     cfg = config or AodlBindingConfig()
     if cascade.capability_id != capability_id:
         raise ValueError("cascade capability_id does not match")
+    shadow = cascade.status != "promoted"
+    if shadow and not cfg.allow_uncredited_shadow:
+        raise ValueError(
+            "production AODL compile requires a promoted cascade; "
+            "set allow_uncredited_shadow=True for explicit shadow evaluation"
+        )
 
     promoted = _promoted_routines(routines)
     # Intent provenance excludes implementation details. A new champion, routine
@@ -491,6 +498,11 @@ def compile_aodl(
     plan = {
         "compiler": "z0int.aodl.v2",
         "profile": "intent-contract",
+        "deployment": {
+            "mode": "shadow" if shadow else "production",
+            "creditStatus": cascade.status,
+            "trafficEligible": not shadow,
+        },
         "harnessId": cfg.harness_id,
         "sourceHash": sh,
         "planHash": plan_hash,
