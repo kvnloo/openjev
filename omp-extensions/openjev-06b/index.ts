@@ -185,10 +185,51 @@ export default function openjev06bExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	pi.registerTool({
+		name: "openjev_jev",
+		label: "OpenJev Jev",
+		description:
+			"Local System One stand-in: Qwen3-0.6B answers noul/choice/score over one state (TypeSafe Jev shape). Fail-open. Not wired as judgmentProvider yet.",
+		parameters: z.object({
+			state: z.union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())]),
+			questions: z.record(z.string(), z.unknown()),
+		}),
+		loadMode: "essential",
+		async execute(_id, params, signal) {
+			const started = Date.now();
+			try {
+				const data = await request(
+					{ action: "systemone", state: params.state, questions: params.questions },
+					signal,
+				);
+				const ms = Date.now() - started;
+				log("jev", `${data.ok ? "ok" : "fail"} ${ms}ms`);
+				return {
+					content: [{ type: "text", text: JSON.stringify({ ...data, ms, backend: "openjev-jev-06b" }) }],
+					details: { ok: data.ok, ms, backend: "openjev-jev-06b" },
+					isError: !data.ok,
+				};
+			} catch (error) {
+				const ms = Date.now() - started;
+				const message = error instanceof Error ? error.message : String(error);
+				log("jev", `fail ${ms}ms ${message}`);
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({ ok: false, ms, backend: "openjev-jev-06b", error: message, fail_open: true }),
+						},
+					],
+					details: { ok: false, ms, fail_open: true },
+				};
+			}
+		},
+	});
+
 	pi.on("before_agent_start", event => ({
 		systemPrompt: [
 			...event.systemPrompt,
-			"OpenJev 0.6B test lane: openjev_decide_06b (Qwen3-0.6B). Faster/weaker than openjev_decide (4B). Do not load both workers on 12GB VRAM.",
+			"OpenJev 0.6B: openjev_decide_06b for OpenJev rows; openjev_jev for TypeSafe System One {state, questions} (noul/choice/score). Not judgmentProvider. Fail-open.",
 		],
 	}));
 
