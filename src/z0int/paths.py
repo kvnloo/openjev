@@ -37,6 +37,8 @@ def ensure_layout(root: Path | None = None) -> dict[str, Path]:
         "tokenomics",
         "logs",
         "shadow",
+        "autoresearch",
+        "runtime",
     )
     out: dict[str, Path] = {"root": root}
     root.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,7 @@
 """Bridge turn open/close logic (resident; no per-turn process spawn for z0int).
 
-Still may invoke Evolution Lab / Kerdoios as in-process or subprocess helpers
-when those packages are available — imports preferred, spawn fallback.
+Production preflight is owned by z0intelligence (no Evolution Lab on live path).
+Kerdoios remains optional residual planner via subprocess when configured.
 """
 
 from __future__ import annotations
@@ -129,30 +129,10 @@ def _run_json(cmd: list[str], cwd: str | Path, timeout: float) -> dict[str, Any]
 
 
 def preflight(prompt: str) -> dict[str, Any]:
-    """Prefer in-process EL; fall back to CLI spawn once (resident worker still wins vs per-turn)."""
-    el_root = Path(os.environ.get("EVOLUTION_LAB_ROOT") or "/workspace/evolution-lab")
-    el_py = os.environ.get("EVOLUTION_LAB_PYTHON") or str(el_root / ".venv" / "bin" / "python")
-    # try import path
-    try:
-        if str(el_root) not in sys.path:
-            sys.path.insert(0, str(el_root))
-        from evolution_lab.cli_preflight import run_preflight  # type: ignore
+    """z0intelligence-owned production preflight — never imports Evolution Lab."""
+    from z0int.preflight import preflight_dict
 
-        return dict(run_preflight(prompt))
-    except Exception:
-        pass
-    try:
-        if str(el_root) not in sys.path:
-            sys.path.insert(0, str(el_root))
-        import evolution_lab  # noqa: F401
-        # generic: module CLI
-    except Exception:
-        pass
-    return _run_json(
-        [el_py, "-m", "evolution_lab", "preflight", prompt],
-        el_root,
-        8.0,
-    )
+    return preflight_dict(prompt)
 
 
 def kerdoios_plan(capability_id: str, work: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -329,7 +309,7 @@ class BridgeRuntime:
         avoided = pf.get("estimated_frontier_tokens_avoided")
         if not isinstance(avoided, (int, float)):
             avoided = 0
-        is_local = route == "local"
+        is_local = route in ("local", "local_model", "routine", "specialist")
         plan_provider = None
         plan_model = None
         if isinstance(plan, dict) and isinstance(plan.get("placements"), list) and plan["placements"]:
@@ -521,6 +501,27 @@ class BridgeRuntime:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
             )
+        except Exception:
+            pass
+
+        # Autoresearch: only verified_success=true with verifier identity
+        try:
+            if verified_success is True:
+                from z0int.autoresearch.queue import enqueue_trace
+
+                enqueue_trace(
+                    trace_id,
+                    verified_success=True,
+                    verifier_id=verification_source or source,
+                    payload={
+                        "snapshot": {
+                            "task_snapshot_id": trace_id,
+                            "required_ops": ["exact_path"],
+                            "baseline_wall_ms": 800,
+                            "frontier_tokens": int(measured or 0),
+                        }
+                    },
+                )
         except Exception:
             pass
 
