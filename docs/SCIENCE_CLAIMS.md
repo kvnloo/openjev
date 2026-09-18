@@ -44,8 +44,11 @@ Always pair precision with:
 
 API: `evolution_lab.coverage_metric.binary_gate_metrics(y_true, y_pred)`.
 
-## L2 bar (next)
+## L2 bar
 
+L0/L1 labels are **not** world success. First L2 card is **`recovery_action`**
+(gym closed-loop + locked P0). Live harness joins still use `trace_id` via
+`z0int receipt join` / `outcome_gold` for world events outside the gym.
 
 ## First L2 specialist (locked pick)
 
@@ -68,6 +71,3 @@ python -m evolution_lab l2-recovery
 Gates (must all hold): confirm≥0.95, val≥0.95, ood≥0.85, closed_loop≥1.0.
 OMP hooks stay **log_only** until that canary marker exists; other capabilities remain shadow.
 
-L0/L1 labels are **not** world success. L2 requires sealed outcomes joined on
-`trace_id` (`z0int receipt join` / `outcome_gold`) for a chosen specialist
-(`recovery_action` or `needs_verification` preferred over `delegate_gating`).
