@@ -1371,12 +1371,15 @@ NOW / DONE (2026-09-17 → data-engine pivot)
      - `evolution_lab.live_stream` + `pn_features` structured-cue scaffold
 
 NEXT (self-improving loop — no MaleCNS/FlyGym/Memento yet)
-  11. run 4× OMP sessions → fill live stream (session holdout A+B+C / test D)
-  12. join outcomes (test/tool/retry/user correction) → upgrade unlabeled→soft→gold
-  13. teacher cascade: fly conf → OpenJev 0.6B → 4B → sparse real Jev
-  14. 2×2 experiment: {old,refined labels} × {old,rich PNs}; frozen arch+judge
-      metric = coverage@≥95% precision; promote-only if beats gen-0
-  15. GPU pop retrain after ~500–2k high-info rows; ABAB mutates **data mixture + features first**
+  11. DONE offline 2×2: old_labels+rich_PN wins → gen-1 promoted
+      confirm 0.630 > gen-0 0.572; coverage@95% 0.287 > 0.199; cascade local_prec ~0.90
+      features: hash64 + structured cues (tool/phase/session); pack pn_dim=124
+      gen-0 backup: evolution-lab runs/gpu-evolve/gen0_champion_backup.npz
+  12. run 4× OMP sessions → fill live stream (session holdout A+B+C / test D)
+  13. join outcomes (test/tool/retry/user correction) → upgrade unlabeled→soft→gold
+  14. teacher cascade: fly conf → OpenJev 0.6B → 4B → sparse real Jev
+  15. GPU pop retrain after ~500–2k high-info rows; ABAB mutates data mixture + features
+
 
 LATER
   16. Memento / FlyGym / MaleCNS / 5B — only after safe local coverage@95% meaningfully improves
