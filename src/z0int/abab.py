@@ -354,3 +354,81 @@ def should_run_c(
 ) -> bool:
     """C is justified only when a discriminating test dominates more research."""
     return competing_hypotheses >= 2 and experiment_value > further_research_value
+
+
+@dataclass(frozen=True)
+class HypothesisBelief:
+    """One competing explanation and its prediction for candidate C tests.
+
+    ``outcome_probability[test_id]`` is P(test succeeds | hypothesis).  The
+    distribution can come from a mechanistic model, prior experiments or an A
+    researcher, but the information-gain calculation itself is deterministic.
+    """
+
+    id: str
+    probability: float
+    outcome_probability: dict[str, float]
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            raise ValueError("hypothesis id is required")
+        if not 0.0 <= self.probability <= 1.0:
+            raise ValueError("hypothesis probability must be in [0,1]")
+        if any(not 0.0 <= float(v) <= 1.0 for v in self.outcome_probability.values()):
+            raise ValueError("outcome probabilities must be in [0,1]")
+
+
+def _entropy(ps: Sequence[float]) -> float:
+    return -sum(p * math.log2(p) for p in ps if p > 0.0)
+
+
+def expected_information_gain(test_id: str, hypotheses: Sequence[HypothesisBelief]) -> float:
+    """Expected Shannon information gain for a binary discriminating test."""
+    active = [h for h in hypotheses if h.probability > 0.0 and test_id in h.outcome_probability]
+    if len(active) < 2:
+        return 0.0
+    total = sum(h.probability for h in active)
+    if total <= 0.0:
+        return 0.0
+    priors = [h.probability / total for h in active]
+    prior_h = _entropy(priors)
+    p_yes = sum(p * float(h.outcome_probability[test_id]) for p, h in zip(priors, active))
+    p_no = 1.0 - p_yes
+
+    def posterior_entropy(observed_yes: bool) -> float:
+        weights = []
+        for p, h in zip(priors, active):
+            like = float(h.outcome_probability[test_id])
+            like = like if observed_yes else 1.0 - like
+            weights.append(p * like)
+        z = sum(weights)
+        if z <= 0.0:
+            return 0.0
+        return _entropy([w / z for w in weights])
+
+    expected_h = p_yes * posterior_entropy(True) + p_no * posterior_entropy(False)
+    return max(0.0, prior_h - expected_h)
+
+
+def choose_discriminating_test(
+    tests: Sequence[ExperimentProposal],
+    hypotheses: Sequence[HypothesisBelief],
+    *,
+    config: AbabConfig | None = None,
+) -> ExperimentProposal | None:
+    """Rank C-stage tests by computed EIG × impact/transfer/cost.
+
+    The proposal's hand-written EIG is ignored for this selection; C gets its
+    information value from the rival hypotheses' differing predictions.
+    """
+    cfg = config or AbabConfig()
+    ranked: list[tuple[float, ExperimentProposal]] = []
+    for p in tests:
+        eig = expected_information_gain(p.id, hypotheses)
+        cost = max(p.estimated_cost, 1e-9)
+        score = eig * max(0.0, p.impact) * max(0.0, p.decision_change) * max(0.0, p.transferability) / cost
+        if score >= cfg.min_priority:
+            ranked.append((score, p))
+    if not ranked:
+        return None
+    return max(ranked, key=lambda x: (x[0], -x[1].estimated_cost, x[1].id))[1]

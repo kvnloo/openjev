@@ -11,8 +11,11 @@ from z0int.abab import (
     ExperimentMetrics,
     ExperimentProposal,
     ExperimentRecord,
+    HypothesisBelief,
     calibrate_credit_gate,
+    choose_discriminating_test,
     choose_next,
+    expected_information_gain,
     transfer_credit_ok,
     gate_status,
     should_run_c,
@@ -91,6 +94,22 @@ class AbabMetaLoopTests(unittest.TestCase):
         fresh = ExperimentArchive()
         low = prop("low", "routing", eig=0.001, cost=10.0)
         self.assertEqual(fresh.stop_reason([low], config=AbabConfig(min_priority=0.01)), "collapsed_information_gain")
+
+    def test_c_stage_computes_information_gain_from_rival_predictions(self) -> None:
+        hs = [
+            HypothesisBelief("representation", 0.5, {"add-features": 0.95, "more-kc": 0.55}),
+            HypothesisBelief("capacity", 0.5, {"add-features": 0.05, "more-kc": 0.55}),
+        ]
+        self.assertGreater(expected_information_gain("add-features", hs), 0.7)
+        self.assertLess(expected_information_gain("more-kc", hs), 0.01)
+
+        tests = [
+            ExperimentProposal("add-features", "h", "verify", "feature ablation", 0.0, 1.0, 1.0, 1.0, 2.0, kind="C"),
+            ExperimentProposal("more-kc", "h", "verify", "capacity sweep", 1.0, 1.0, 1.0, 1.0, 1.0, kind="C"),
+        ]
+        # Despite the second proposal claiming a higher manual EIG, C chooses
+        # the test that actually separates the hypotheses.
+        self.assertEqual(choose_discriminating_test(tests, hs).id, "add-features")
 
     def test_c_stage_only_when_discriminating_experiment_is_better(self) -> None:
         self.assertTrue(should_run_c(experiment_value=0.8, further_research_value=0.3, competing_hypotheses=2))
