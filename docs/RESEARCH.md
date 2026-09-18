@@ -1353,21 +1353,33 @@ DONE (2026-09-17, evolution-lab nightly b9e4db5)
   10. gpu-abab: A mutates DataRecipe, B trains P=256, keep iff GPU>ridge+1pp and majority
       8 waves, 2 keeps (wave 4 n=16384; wave 5 full split).
 
-NOW / DONE (2026-09-17 safe coverage + weak-family probe)
-  9. shadow + confidence/abstain cascade on wave-5 champion
-     - wave-5 pack locked: n_kc=96 k_winners=20 pn_dim=64 confirm=0.572 (beats ridge 0.363)
+NOW / DONE (2026-09-17 → data-engine pivot)
+  9. shadow + confidence/abstain cascade on wave-5 champion (gen-0 locked)
+     - wave-5 pack: n_kc=96 k_winners=20 pn_dim=64 confirm=0.572 (beats ridge 0.363)
      - promote-only writes; champion.npz gitignored + history-scrubbed (local only)
-     - CLI: confirm/shadow/decide/coverage + `next-action-weak`
-     - policy: high-conf EXECUTE (p≥0.60, margin≥0.30) + DELEGATE (p≥0.40) → local; else → Jev
-     - coverage eval: cov≈0.196 local_prec≈0.669; shadow ≥120 cascade rows (local+escalate)
-  10b. weak-family oversample search (EDIT/WEB/VERIFY/ABSTAIN boost∈{1,2,4,8}, frozen arch)
-     - best overall gpu=0.380 < champion 0.572 → **no promote** (gate held)
-     - boost↑ lifts EDIT/WEB (EDIT→0.42, WEB→0.42 at ×8) but collapses DELEGATE→0 and overall
-     - conclusion: need better labels/features for weak families, not naive oversample
+  10. safe-offload metric shift: maximize coverage @ ≥95% precision (not raw acc)
+     - risk/coverage gen-0: DELEGATE *predictions* are ~0.980 precise (n=3063, ~19.9% confirm)
+       → absorb **all** DELEGATE preds locally (min_p=0)
+     - EXECUTE has **no** ≥0.90 precision slice by margin; keep high-conf only
+       (p≥0.60, margin≥0.30 → n≈2931 prec≈0.664)
+     - updated cascade eval: cov≈0.389 local_prec≈0.826 (was cov≈0.196 / prec≈0.669)
+  10b. weak-family oversample dead end (boost 1/2/4/8): best overall 0.380 ≪ 0.572
+  10c. live private stream scaffold (collect first, train async):
+     - `~/.z0int/stream/{raw,high_info,outcome_gold}.jsonl`
+     - schema: trace_id, session_id, fly probs, Jev when queried, route, latency, disagree
+     - flyforge-jev OMP extension: log-only multi-session writer
+     - `evolution_lab.live_stream` + `pn_features` structured-cue scaffold
 
-LATER (needs Kevin or new signal)
-  11. gold/disagree labels for EDIT+WEB, or new PN features — blocking useful weak-family lift
-  12. Memento / FlyGym / MaleCNS — only after local safe-coverage prec meaningfully improves
+NEXT (self-improving loop — no MaleCNS/FlyGym/Memento yet)
+  11. run 4× OMP sessions → fill live stream (session holdout A+B+C / test D)
+  12. join outcomes (test/tool/retry/user correction) → upgrade unlabeled→soft→gold
+  13. teacher cascade: fly conf → OpenJev 0.6B → 4B → sparse real Jev
+  14. 2×2 experiment: {old,refined labels} × {old,rich PNs}; frozen arch+judge
+      metric = coverage@≥95% precision; promote-only if beats gen-0
+  15. GPU pop retrain after ~500–2k high-info rows; ABAB mutates **data mixture + features first**
+
+LATER
+  16. Memento / FlyGym / MaleCNS / 5B — only after safe local coverage@95% meaningfully improves
 
 ```
 
