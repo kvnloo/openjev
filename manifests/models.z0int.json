@@ -16,7 +16,28 @@
       "dtype": "bfloat16",
       "roles": ["semantic_teacher", "fallback", "direct_option_logits"],
       "resident_preferred": false,
-      "note": "Do not co-reside with openjev_06b on 12GB."
+      "note": "Do not co-reside with openjev_06b or nanojev_06b on 12GB."
+    },
+    "nanojev_06b": {
+      "type": "hf_bundle",
+      "hf": "C-Tianyu/NanoJev",
+      "revision": "4a19595eada0857133c0d2be024f879a4077054b",
+      "allow_patterns": [
+        "best.safetensors",
+        "config.json",
+        "tokenizer/*",
+        "backbone_config/*"
+      ],
+      "min_vram_gb": 3,
+      "dtype": "bfloat16",
+      "roles": [
+        "semantic_decision",
+        "system_one",
+        "dynamic_choice",
+        "outcome_predictor"
+      ],
+      "resident_preferred": true,
+      "note": "Verify measured VRAM before treating min_vram_gb as a hard production fact. Managed under ~/.z0int/models/nanojev_06b/"
     },
     "reranker_4b": {
       "hf": "Qwen/Qwen3-Reranker-4B",
@@ -35,17 +56,22 @@
   },
   "policies": {
     "twelve_gb": {
-      "resident": ["openjev_06b", "local_mb"],
-      "on_demand": ["openjev_4b"],
-      "never_coreside": [["openjev_06b", "openjev_4b"]]
+      "resident": ["nanojev_06b", "local_mb"],
+      "on_demand": ["openjev_4b", "openjev_06b"],
+      "never_coreside": [
+        ["nanojev_06b", "openjev_4b"],
+        ["nanojev_06b", "openjev_06b"],
+        ["openjev_06b", "openjev_4b"]
+      ]
     },
     "cpu_only": {
       "resident": ["local_mb"],
       "on_demand": []
     },
     "high_vram": {
-      "resident": ["openjev_4b", "local_mb"],
-      "on_demand": ["openjev_06b"]
+      "resident": ["nanojev_06b", "openjev_4b", "local_mb"],
+      "on_demand": ["openjev_06b"],
+      "never_coreside": [["nanojev_06b", "openjev_06b"]]
     }
   }
 }

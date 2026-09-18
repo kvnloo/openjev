@@ -23,9 +23,14 @@ class ModelsPlan(unittest.TestCase):
 
         plan = plan_models(vram_gb=12.0)
         self.assertEqual(plan["policy"], "twelve_gb")
-        self.assertIn("openjev_06b", plan["resident"])
-        self.assertIn("openjev_4b", plan["on_demand"])
+        # NanoJev is the preferred resident semantic decision engine on 12GB;
+        # openjev_06b remains available on_demand and must not coreside with nanojev.
+        self.assertIn("nanojev_06b", plan["resident"])
+        self.assertIn("local_mb", plan["resident"])
         self.assertNotIn("openjev_4b", plan["resident"])
+        pairs = {tuple(x) for x in plan["never_coreside"]}
+        self.assertIn(("nanojev_06b", "openjev_4b"), pairs)
+        self.assertIn(("nanojev_06b", "openjev_06b"), pairs)
 
     def test_plan_cpu(self):
         from z0int import models_mgmt

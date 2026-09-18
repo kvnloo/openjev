@@ -32,3 +32,18 @@ This repo follows the [Verified OSS Loop](https://github.com/kvnloo/verified-oss
 - Preserve exact model and source revisions. Fetch third-party evaluation records only through `benchmarks/fetch_sources.py`; do not commit model weights, caches, or third-party raw records.
 - Personalized state lives under **`~/.z0int/`** only (episodes, specialists, stream, research). Never default champions into the git tree.
 - `webgpu-demo/` is static and has no build step. Preserve `_headers`, runtime version pins, browser-only inference, and the explicit probability limitations.
+
+## Decision backends
+
+- Contract: `src/z0int/backends/` (`DecisionBackend`, not Provider).
+- First local semantic engine: NanoJev (`nanojev` / model id `nanojev_06b`).
+- Agent commands:
+  - `z0int backends list --json`
+  - `z0int backends doctor --json`
+  - `z0int backends eval --backend nanojev --input tests/fixtures/nanojev_request.json --json`
+- Do not load NanoJev from ordinary doctor/status list paths.
+- Do not mark backend inference as `verified_success`; ambient turn close ≠ gold.
+
+## Brand (background)
+
+Product name **z0intelligence** (stochastic-parrot play; abundance under finite frontier budgets with Kerdoios). Details: `docs/brand.md`. Do not mass-rename the `z0int` package in drive-by PRs.

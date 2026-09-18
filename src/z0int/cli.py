@@ -414,6 +414,23 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(cfs)
 
     # Future compiler stack — remainder args forwarded to module CLIs.
+
+    be = sub.add_parser("backends", help="DecisionBackend registry (list / doctor / eval)")
+    be_sub = be.add_subparsers(dest="backends_cmd", required=True)
+    bel = be_sub.add_parser("list", help="List registered backends (no model load)")
+    bel.add_argument("--json", action="store_true")
+    bed = be_sub.add_parser("doctor", help="Filesystem/config backend health (no load by default)")
+    bed.add_argument("--json", action="store_true")
+    bed.add_argument("--load", action="store_true", help="Explicitly load weights (GPU)")
+    bed.add_argument("--backend", default=None, help="Single backend id/alias")
+    bec = be_sub.add_parser("capabilities", help="Show capability metadata")
+    bec.add_argument("name", nargs="?", default="nanojev")
+    bec.add_argument("--json", action="store_true")
+    bee = be_sub.add_parser("eval", help="Run a DecisionRequest JSON through a backend")
+    bee.add_argument("--backend", default="nanojev")
+    bee.add_argument("--input", required=True, help="Path to request JSON")
+    bee.add_argument("--json", action="store_true", default=True)
+
     for name, help_txt in (
         ("routine", "Compile/apply specialist region routines (→ z0int.routines)"),
         ("cascade", "Optimize specialist cascades for premium tokens (→ z0int.cascade)"),
@@ -431,6 +448,112 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+
+def _cmd_backends(args: argparse.Namespace) -> int:
+    """backends list|doctor|capabilities|eval — never import torch on list path."""
+    from z0int.backends.registry import (
+        backend_status,
+        create_backend,
+        get_backend_spec,
+        list_backend_specs,
+        register_builtin_backends,
+    )
+
+    cmd = args.backends_cmd
+    if cmd == "list":
+        register_builtin_backends()
+        rows = []
+        for spec in list_backend_specs():
+            # Cheap health: factory must not load GPU; health(load=False) is FS only.
+            try:
+                h = spec.factory().health(load=False)
+                rows.append(
+                    {
+                        "id": spec.id,
+                        "kind": spec.kind,
+                        "local": spec.local,
+                        "configured": h.configured,
+                        "ready": h.ready,
+                        "model": h.model,
+                        "detail": h.detail,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                rows.append(
+                    {
+                        "id": spec.id,
+                        "kind": spec.kind,
+                        "local": spec.local,
+                        "configured": False,
+                        "ready": False,
+                        "model": None,
+                        "detail": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+        payload = {"schema": "z0int.backends.v1", "backends": rows}
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print("id                 kind              ready  model")
+            for r in rows:
+                print(
+                    f"{r['id']:<18} {r['kind']:<16} "
+                    f"{'yes' if r['ready'] else 'no':<5} {r.get('model') or '-'}"
+                )
+                if r.get("detail"):
+                    print(f"  {r['detail']}")
+        return 0
+
+    if cmd == "doctor":
+        rows = backend_status(args.backend, load=bool(args.load))
+        payload = {
+            "schema": "z0int.backends.doctor.v1",
+            "load": bool(args.load),
+            "backends": rows,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, default=str))
+        else:
+            for r in rows:
+                mark = "✓" if r.get("ready") else "○"
+                print(f"{mark} {r['id']}: {r.get('detail')}")
+                if r.get("checkpoint"):
+                    print(f"  checkpoint: {r['checkpoint']}")
+        return 0
+
+    if cmd == "capabilities":
+        spec = get_backend_spec(args.name)
+        from dataclasses import asdict as _asdict
+
+        backend = spec.factory()
+        caps = _asdict(backend.capabilities)
+        payload = {"schema": "z0int.backends.capabilities.v1", "id": spec.id, "capabilities": caps}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            for k, v in caps.items():
+                print(f"{k}: {v}")
+        return 0
+
+    if cmd == "eval":
+        from pathlib import Path
+
+        from z0int.backends.base import request_from_mapping, result_to_dict
+
+        path = Path(args.input).expanduser()
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        request = request_from_mapping(raw)
+        backend = create_backend(args.backend)
+        result = backend.evaluate(request)
+        payload = result_to_dict(result)
+        print(json.dumps(payload, indent=2, default=str))
+        return 0
+
+    print(f"unknown backends command: {cmd}", file=sys.stderr)
+    return 2
+
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
@@ -441,6 +564,9 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_doctor(as_json=as_json)
     if args.cmd == "status":
         return cmd_status(as_json=as_json)
+    if args.cmd == "backends":
+        return _cmd_backends(args)
+
     if args.cmd == "onboard":
         return cmd_onboard(
             auto=bool(getattr(args, "auto", True)),
