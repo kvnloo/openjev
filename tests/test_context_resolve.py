@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
+import os
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -11,6 +12,19 @@ from z0int.context_resolve import (
     project_to_aodl_fields,
     resolve_context,
 )
+
+
+@contextmanager
+def z0home(tmp: str):
+    prev = os.environ.get("Z0INT_HOME")
+    os.environ["Z0INT_HOME"] = tmp
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("Z0INT_HOME", None)
+        else:
+            os.environ["Z0INT_HOME"] = prev
 
 
 class ContextResolveTests(unittest.TestCase):
@@ -68,26 +82,21 @@ class ContextResolveTests(unittest.TestCase):
         self.assertTrue(any("memory recall disabled" in g for g in packet.unresolved_gaps))
 
     def test_recipe_cache_roundtrip(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with mock.patch.dict("os.environ", {"Z0INT_HOME": tmp}):
-                from z0int import paths as paths_mod
-                from z0int.context_resolve import load_recipe_cache
+        with tempfile.TemporaryDirectory() as tmp, z0home(tmp):
+            from z0int.context_resolve import load_recipe_cache
 
-                # re-import home
-                f = Path(tmp) / "models"
-                f.mkdir(parents=True)
-                root = Path(tmp) / "proj"
-                root.mkdir()
-                (root / "a.py").write_text("x=1\n", encoding="utf-8")
-                p1 = resolve_context(
-                    needs=[InformationNeed(id="e", description="a", kind="exact_path", path="a.py")],
-                    project_root=root,
-                    allow_qmd=False,
-                    use_cache=True,
-                )
-                cached = load_recipe_cache(p1.recipe.request_signature)
-                self.assertIsNotNone(cached)
-                self.assertEqual(cached["recipe"]["capability_id"], "context_resolve")
+            root = Path(tmp) / "proj"
+            root.mkdir()
+            (root / "a.py").write_text("x=1\n", encoding="utf-8")
+            p1 = resolve_context(
+                needs=[InformationNeed(id="e", description="a", kind="exact_path", path="a.py")],
+                project_root=root,
+                allow_qmd=False,
+                use_cache=True,
+            )
+            cached = load_recipe_cache(p1.recipe.request_signature)
+            self.assertIsNotNone(cached)
+            self.assertEqual(cached["recipe"]["capability_id"], "context_resolve")
 
 
 if __name__ == "__main__":

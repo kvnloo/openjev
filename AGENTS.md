@@ -60,3 +60,10 @@ Product name **z0intelligence** (stochastic-parrot play; abundance under finite 
 - Family `coding.bounded_worktree_patch`: `z0int task fixture|authorize|run|status`
 - Checkpoints: `$Z0INT_HOME/state/tasks/<id>.json` (default `~/.z0int`)
 - `execution_completed` ≠ `verified_success`
+
+## Bridge hot-reload (v2)
+
+- Shim: `omp-extensions/z0int-bridge/index.ts` (immutable after session start)
+- Worker: `python -u -m z0int.bridge.worker`
+- Docs: `docs/bridge-hot-reload.md`
+- After first install: **one OMP restart**, then `/reload-plugins` hot-swaps Python.
