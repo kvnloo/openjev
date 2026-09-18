@@ -1339,22 +1339,26 @@ Hard gates:
 **GPU first.** Use the 3080 Ti as a *population* engine for tiny policies, not a faster executor for one 640-weight fly. One mushroom-body forward pass is launch-overhead-bound; thousands of candidates × episodes is what the GPU is for.
 
 ```text
-NOW
+DONE (2026-09-17, evolution-lab nightly b9e4db5)
   1. local_jax backend — exact mushroom algorithm in jnp.float32
   2. parity: CPU local_plasticity ≈ GPU local_jax on locked recovery seeds
-  3. population batch P = 256 → 1,024 → 4,096 → 16,384 (shared frozen PN→KC)
-  4. GPU cheap-filter → frozen CPU judge (serial rebench before keep)
-  5. measure candidate-gen/s, GPU util, VRAM, joules/verified candidate (NVML)
+  3. population batch P = 256 → 4,096 smoked on 3080 Ti (16,384 not needed)
+  4. GPU cheap-filter → frozen CPU judge (ridge + majority; serial rebench)
+  5. NVML snapshot + J/candidate estimate
+  6. vLLM SLM already on the card as parallel teacher (do not GPU-ify the judge)
+  7. Hermes/OMP histories compiled (~76,970 next-action episodes)
+  8. ridge vs GPU-MB: empty-text bug fixed (user/tier). Champion recipe:
+     n_train=all (61,576), gold_only=false, confirm_frac=0.2
+     GPU 0.566 vs ridge 0.363 vs majority 0.353. Gold-only: ridge wins.
+  10. gpu-abab: A mutates DataRecipe, B trains P=256, keep iff GPU>ridge+1pp and majority
+      8 waves, 2 keeps (wave 4 n=16384; wave 5 full split).
 
-PARALLEL
-  6. vLLM SLM as Jev-like semantic teacher/fallback (do not GPU-ify the judge)
+NOW
+  9. shadow in live harness using wave-5 champion pack; Jev only on ambiguous cases
+  persist data/next_action/champion.json + runs/gpu-evolve/next_action_champion.npz
 
-THEN
-  7. compile Hermes/OMP histories into next-action episodes
-  8. ridge/MLP vs mushroom-body vs GPU population on that task
-  9. shadow in live harness; Jev only on ambiguous cases
-  10. ABAB mutates dataset recipe + architecture (not the judge)
-  11. Memento / FlyGym later
+LATER
+  11. Memento / FlyGym
 ```
 
 Do **not** start with FlyGym, full MaleCNS hot-path, or a 5B SLM as the fly executor.
