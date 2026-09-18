@@ -3,16 +3,17 @@
 AODL owns intent, topology, policies, budgets and authority.  z0int owns the
 implementation that satisfies that contract.  This module intentionally does
 *not* invent ``fly``, ``mushroomBody``, ``routine`` or ``cascade`` node kinds.
-It compiles z0int's runtime into the existing HOTL 0.2 vocabulary:
+It compiles z0int into the existing HOTL 0.2 vocabulary without turning
+implementation strategy into user intent.  Following the intent-contract
+profile, the stable ``intentGraph`` declares the capability, participating
+executor, verifier, evidence store, budgets and acceptance criteria.  The
+actual routine -> specialist -> local-SLM -> frontier strategy lives in the
+compiled ``plan``.
 
-    task -> executor -> service/model -> verifier -> stateStore
-                          ^
-                       artifact
-
-Implementation-specific model/checkpoint/provider bindings live in ``plan``;
-the intent graph remains portable.  Runtime route/outcome receipts can be
-encoded as AODL ``eventLog`` entries so the desired graph and observed graph
-stay distinct.
+Implementation-specific model/checkpoint/provider bindings therefore live in
+``plan``; runtime route/outcome receipts live in ``eventLog`` and concrete
+runtime topology may be projected into optional ``observedGraph``.  This keeps
+intent, compiled strategy and observed O_t separate.
 """
 
 from __future__ import annotations
@@ -29,6 +30,9 @@ from .cascade import CascadePolicy
 from .routines import RoutineCandidate
 
 SPEC_VERSION = "0.2"
+# AODL nightly/intent-contract catalog: executor ids only. o8 is a control-room;
+# firstmate is a distro. Unknown ids fail closed, matching the upstream validator.
+AODL_EXECUTOR_HARNESS_IDS = frozenset({"hermes", "omp", "grok", "codex", "claude", "pi", "fx"})
 AODL_NODE_KINDS = frozenset(
     {
         "task",
@@ -75,6 +79,7 @@ class AodlBudgets:
     latency_ms: float | None = None
     usd: float | None = None
     joules: float | None = None
+    attention: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -109,8 +114,11 @@ class AodlBindingConfig:
             self.routine_artifact_id,
         ):
             _require_id(value)
-        if not self.harness_id:
-            raise ValueError("harness_id is required")
+        if self.harness_id not in AODL_EXECUTOR_HARNESS_IDS:
+            raise ValueError(
+                f"unknown/non-executor AODL harness_id {self.harness_id!r}; "
+                f"expected one of {sorted(AODL_EXECUTOR_HARNESS_IDS)}"
+            )
         if self.revision < 0:
             raise ValueError("revision must be >= 0")
         if not 0.0 < self.precision_floor <= 1.0:
@@ -156,18 +164,28 @@ def _node(
     capabilities: Sequence[str],
     *,
     authority: Sequence[str] | None = None,
+    harness: str | None = None,
+    lifecycle: str = "declared",
 ) -> dict[str, Any]:
     _require_id(node_id)
     if kind not in AODL_NODE_KINDS:
         raise ValueError(f"unknown AODL node kind {kind!r}")
-    return {
+    if harness is not None:
+        if kind != "executor":
+            raise ValueError("AODL harness is only allowed on executor nodes")
+        if harness not in AODL_EXECUTOR_HARNESS_IDS:
+            raise ValueError(f"unknown/non-executor AODL harness {harness!r}")
+    out = {
         "id": node_id,
         "kind": kind,
         "ports": list(ports),
         "capabilities": list(capabilities),
         "authorityCeiling": list(authority if authority is not None else capabilities),
-        "lifecycle": "declared",
+        "lifecycle": lifecycle,
     }
+    if harness is not None:
+        out["harness"] = harness
+    return out
 
 
 def _edge(
@@ -233,6 +251,7 @@ class AodlSpend:
     latency_ms: float = 0.0
     usd: float = 0.0
     joules: float = 0.0
+    attention: float = 0.0
 
     def plus(self, other: "AodlSpend") -> "AodlSpend":
         return AodlSpend(
@@ -241,6 +260,7 @@ class AodlSpend:
             latency_ms=max(0.0, self.latency_ms + other.latency_ms),
             usd=max(0.0, self.usd + other.usd),
             joules=max(0.0, self.joules + other.joules),
+            attention=max(0.0, self.attention + other.attention),
         )
 
 
@@ -277,16 +297,16 @@ def compile_aodl(
     routines: Sequence[RoutineCandidate] = (),
     config: AodlBindingConfig | None = None,
 ) -> dict[str, Any]:
-    """Compile z0int runtime intent into a HOTL/AODL 0.2 document.
+    """Compile a z0int capability into the AODL intent-contract profile.
 
-    The compiled document is intentionally split:
+    This intentionally keeps three objects separate:
 
-    * ``intentGraph`` / ``policies`` / ``constraints`` describe portable
-      intent and Gamma budgets;
-    * ``plan.bindings`` points those abstract nodes at z0int artifacts/runtime
-      selectors without changing the IR ontology;
-    * observed route/outcome activity belongs in ``eventLog`` and can be
-      appended with :func:`route_event` / :func:`outcome_event`.
+    * intent contract: ``intentGraph`` + policies + Gamma constraints;
+    * compiled strategy: routine/specialist/SLM/frontier bindings in ``plan``;
+    * observed runtime: append-only ``eventLog`` and optional ``observedGraph``.
+
+    Evolution Lab may change checkpoints, thresholds, routines or providers
+    without changing the intent contract or its provenance hash.
     """
 
     cfg = config or AodlBindingConfig()
@@ -294,22 +314,24 @@ def compile_aodl(
         raise ValueError("cascade capability_id does not match")
 
     promoted = _promoted_routines(routines)
-    material = {
-        "compiler": "z0int.aodl.v1",
+    # Intent provenance excludes implementation details. A new champion, routine
+    # or threshold changes planHash, not sourceHash.
+    intent_material = {
+        "profile": "intent-contract",
         "capability_id": capability_id,
-        "cascade": cascade.to_dict(),
-        "routine_ids": sorted(r.routine_id for r in promoted),
         "harness_id": cfg.harness_id,
         "revision": cfg.revision,
         "budgets": cfg.budgets.to_dict(),
         "precision_floor": cfg.precision_floor,
-        "stage_bindings": {k: dict(v) for k, v in sorted(cfg.stage_bindings.items())},
-        "stage_roles": dict(sorted(cfg.stage_roles.items())),
-        "include_routine_slot": cfg.include_routine_slot,
+        "max_success_regression": cascade.max_success_regression,
+        "objective": cascade.objective,
+        "privacy": {"personalArtifacts": "local_only", "receipts": "confidential"},
     }
-    sh = source_hash(material)
+    sh = source_hash(intent_material)
 
     task_id = _safe_id("capability-", capability_id)
+    # Stable intent/participation graph. Do not put routine/model cascade stages
+    # here: they are strategy and belong to the compiled plan.
     nodes: list[dict[str, Any]] = [
         _node(
             task_id,
@@ -323,11 +345,11 @@ def compile_aodl(
             "executor",
             [
                 _port("in", "in", "DecisionRequest"),
-                _port("route", "out", "StageRequest"),
                 _port("decision", "out", "DecisionResult"),
             ],
-            ["route", "evaluate"],
-            authority=["route", "evaluate"],
+            ["execute"],
+            authority=["execute"],
+            harness=cfg.harness_id,
         ),
         _node(
             cfg.verifier_id,
@@ -356,7 +378,7 @@ def compile_aodl(
             "out",
             "in",
             sh,
-            grant=["route"],
+            grant=["execute"],
         ),
         _edge(
             "e-runtime-verify",
@@ -380,91 +402,40 @@ def compile_aodl(
         ),
     ]
 
+    # Everything below is strategy/implementation and therefore compiled plan.
     bindings: dict[str, Any] = {
         cfg.executor_id: {
             "runtime": "z0int",
             "entrypoint": "preflight",
             "harnessId": cfg.harness_id,
         },
-        cfg.verifier_id: {
-            "runtime": "z0int",
-            "entrypoint": "outcome",
-        },
-        cfg.receipt_store_id: {
-            "runtime": "z0int",
-            "uri": "z0int://receipts",
-        },
+        cfg.verifier_id: {"runtime": "z0int", "entrypoint": "outcome"},
+        cfg.receipt_store_id: {"runtime": "z0int", "uri": "z0int://receipts"},
     }
-
+    execution_nodes: list[dict[str, Any]] = []
     route_order: list[str] = []
+
     if cfg.include_routine_slot:
-        nodes.extend(
-            [
-                _node(
-                    cfg.routine_artifact_id,
-                    "artifact",
-                    [_port("out", "out", "RoutineRegistry", classification="local_only")],
-                    ["provide"],
-                    authority=["provide"],
-                ),
-                _node(
-                    cfg.routine_service_id,
-                    "service",
-                    [
-                        _port("in", "in", "StageRequest"),
-                        _port("registry", "in", "RoutineRegistry", classification="local_only"),
-                        _port("out", "out", "DecisionResult"),
-                    ],
-                    ["evaluate"],
-                    authority=["evaluate"],
-                ),
-            ]
-        )
-        edges.extend(
-            [
-                _edge(
-                    "e-routine-artifact",
-                    "artifact",
-                    cfg.routine_artifact_id,
-                    cfg.routine_service_id,
-                    "out",
-                    "registry",
-                    sh,
-                ),
-                _edge(
-                    "e-runtime-routine",
-                    "allocation",
-                    cfg.executor_id,
-                    cfg.routine_service_id,
-                    "route",
-                    "in",
-                    sh,
-                    grant=["evaluate"],
-                ),
-                _edge(
-                    "e-routine-verify",
-                    "verification",
-                    cfg.routine_service_id,
-                    cfg.verifier_id,
-                    "out",
-                    "in",
-                    sh,
-                    grant=["verify"],
-                ),
-            ]
-        )
         bindings[cfg.routine_artifact_id] = {
+            "kind": "artifact",
             "artifactType": "z0int.routine_registry.v1",
             "uri": "z0int://routines",
             "routineIds": sorted(r.routine_id for r in promoted),
             "enabled": bool(promoted),
         }
         bindings[cfg.routine_service_id] = {
+            "kind": "service",
             "runtime": "z0int",
             "entrypoint": "routine_registry.decide",
             "enabled": bool(promoted),
             "failOpen": "next_route_stage",
+            "artifact": cfg.routine_artifact_id,
         }
+        execution_nodes.append({
+            "id": cfg.routine_service_id,
+            "kind": "service",
+            "binding": cfg.routine_service_id,
+        })
         route_order.append(cfg.routine_service_id)
 
     seen_logical: set[str] = set()
@@ -474,43 +445,8 @@ def compile_aodl(
         if sid in seen_logical:
             raise ValueError(f"multiple implementation stages map to logical AODL slot {logical!r}")
         seen_logical.add(sid)
-        nodes.append(
-            _node(
-                sid,
-                "model",
-                [
-                    _port("in", "in", "StageRequest"),
-                    _port("out", "out", "DecisionResult"),
-                ],
-                ["infer"],
-                authority=["infer"],
-            )
-        )
-        edges.extend(
-            [
-                _edge(
-                    f"e-runtime-{sid}",
-                    "allocation",
-                    cfg.executor_id,
-                    sid,
-                    "route",
-                    "in",
-                    sh,
-                    grant=["infer"],
-                ),
-                _edge(
-                    f"e-{sid}-verify",
-                    "verification",
-                    sid,
-                    cfg.verifier_id,
-                    "out",
-                    "in",
-                    sh,
-                    grant=["verify"],
-                ),
-            ]
-        )
         bindings[sid] = {
+            "kind": "model",
             **_stage_binding(stage.name, cfg),
             "implementationStage": stage.name,
             "logicalRole": logical,
@@ -518,20 +454,15 @@ def compile_aodl(
             "minConfidence": stage.min_confidence,
             "terminal": stage.terminal,
         }
+        execution_nodes.append({"id": sid, "kind": "model", "binding": sid})
         route_order.append(sid)
 
     final_node = _stage_node_id(_logical_stage(cascade.final_stage, cfg))
     policies = {
-        "kinds": ["router", "sequence"],
-        "fanIn": "any",
+        "kinds": ["sequence", "retry"],
+        "fanIn": "all",
         "dynamic": {"allowed": False, "maxChildren": 0, "maxDepth": 0},
-        "route": {
-            "strategy": "first_eligible",
-            "order": route_order,
-            "eligibility": "compiled_plan_binding",
-            "abstain": "next",
-            "final": final_node,
-        },
+        "protocol": "intent-contract",
     }
     constraints = {
         "budgets": cfg.budgets.to_dict(),
@@ -547,10 +478,27 @@ def compile_aodl(
             "receipts": "confidential",
         },
     }
-    plan = {
-        "compiler": "z0int.aodl.v1",
-        "harnessId": cfg.harness_id,
+    plan_material = {
         "bindings": bindings,
+        "route_order": route_order,
+        "final": final_node,
+        "sourceSchemas": {
+            "cascade": cascade.schema,
+            "routine": "z0int.routine_candidate.v1",
+        },
+    }
+    plan_hash = source_hash(plan_material)
+    plan = {
+        "compiler": "z0int.aodl.v2",
+        "profile": "intent-contract",
+        "harnessId": cfg.harness_id,
+        "sourceHash": sh,
+        "planHash": plan_hash,
+        "bindings": bindings,
+        "executionGraph": {
+            "nodes": execution_nodes,
+            "routeOrder": route_order,
+        },
         "route": {
             "order": route_order,
             "thresholds": {
@@ -559,12 +507,14 @@ def compile_aodl(
                 if not s.terminal
             },
             "final": final_node,
+            "strategy": "first_eligible",
+            "abstain": "next",
         },
-        "sourceSchemas": {
-            "cascade": cascade.schema,
-            "routine": "z0int.routine_candidate.v1",
-        },
-        "note": "AODL owns intent/policy/budgets; z0int owns implementation; provider placement may be resolved by Kerdoios.",
+        "sourceSchemas": plan_material["sourceSchemas"],
+        "note": (
+            "Intent contract is stable; z0int/Evolution Lab may change this compiled "
+            "strategy. Provider placement for residual model stages may be resolved by Kerdoios."
+        ),
     }
     doc = {
         "specVersion": SPEC_VERSION,
@@ -581,6 +531,95 @@ def compile_aodl(
     return doc
 
 
+def project_observed_graph(
+    doc: Mapping[str, Any],
+    *,
+    stage: str,
+    lifecycle: str = "running",
+) -> dict[str, Any]:
+    """Project one concrete z0int runtime choice into AODL ``observedGraph``.
+
+    The observed graph may contain implementation participants that are absent
+    from the stable intent graph. Policies remain on the intent document.
+    """
+
+    contract = runtime_contract(doc)
+    if lifecycle not in {"declared", "ready", "running", "succeeded", "failed", "cancelled"}:
+        raise ValueError(f"invalid AODL lifecycle {lifecycle!r}")
+    if stage not in contract.bindings:
+        raise ValueError(f"unknown compiled stage {stage!r}")
+    binding = contract.bindings[stage]
+    kind = str(binding.get("kind") or ("service" if stage == "routine-service" else "model"))
+    if kind not in {"service", "model"}:
+        raise ValueError(f"observed route stage kind {kind!r} is not executable")
+
+    executor = _node(
+        "observed-z0int",
+        "executor",
+        [_port("out", "out", "StageRequest")],
+        ["execute"],
+        authority=["execute"],
+        harness=contract.harness_id,
+        lifecycle="running",
+    )
+    selected = _node(
+        _safe_id("observed-", stage),
+        kind,
+        [
+            _port("in", "in", "StageRequest"),
+            _port("out", "out", "DecisionResult"),
+        ],
+        ["evaluate" if kind == "service" else "infer"],
+        lifecycle=lifecycle,
+    )
+    verifier = _node(
+        "observed-verifier",
+        "verifier",
+        [_port("in", "in", "DecisionResult")],
+        ["verify"],
+        authority=["verify"],
+        lifecycle="ready",
+    )
+    sh = contract.source_hash
+    graph = {
+        "nodes": [executor, selected, verifier],
+        "edges": [
+            _edge(
+                "e-observed-route",
+                "allocation",
+                executor["id"],
+                selected["id"],
+                "out",
+                "in",
+                sh,
+                grant=["evaluate" if kind == "service" else "infer"],
+            ),
+            _edge(
+                "e-observed-verify",
+                "verification",
+                selected["id"],
+                verifier["id"],
+                "out",
+                "in",
+                sh,
+                grant=["verify"],
+            ),
+        ],
+    }
+    return graph
+
+
+def with_observed_graph(
+    doc: Mapping[str, Any],
+    *,
+    stage: str,
+    lifecycle: str = "running",
+) -> dict[str, Any]:
+    out = dict(doc)
+    out["observedGraph"] = project_observed_graph(doc, stage=stage, lifecycle=lifecycle)
+    assert_basic_aodl_invariants(out)
+    return out
+
 def assert_basic_aodl_invariants(doc: Mapping[str, Any]) -> None:
     """Small local guard; AODL's own validator remains authoritative.
 
@@ -595,26 +634,60 @@ def assert_basic_aodl_invariants(doc: Mapping[str, Any]) -> None:
     if doc["specVersion"] != SPEC_VERSION:
         raise ValueError("z0int only emits HOTL/AODL 0.2")
     _require_id(str(doc["graphId"]))
-    graph = doc["intentGraph"]
-    nodes = list(graph["nodes"])
-    edges = list(graph["edges"])
-    index = {n["id"]: n for n in nodes}
-    if len(index) != len(nodes):
-        raise ValueError("duplicate AODL node id")
-    for node in nodes:
-        if node["kind"] not in AODL_NODE_KINDS:
-            raise ValueError(f"non-AODL node kind {node['kind']!r}")
-    for edge in edges:
-        if edge["relation"] not in AODL_EDGE_RELATIONS:
-            raise ValueError(f"non-AODL edge relation {edge['relation']!r}")
-        if edge["from"] not in index or edge["to"] not in index:
-            raise ValueError("AODL edge endpoint missing")
-        fp = {p["id"]: p for p in index[edge["from"]]["ports"]}[edge["fromPort"]]
-        tp = {p["id"]: p for p in index[edge["to"]]["ports"]}[edge["toPort"]]
-        if fp["direction"] != "out" or tp["direction"] != "in":
-            raise ValueError("AODL edge port direction invalid")
-        if fp["schema"] != tp["schema"]:
-            raise ValueError("AODL edge port schemas do not match")
+    def _check_graph(graph: Mapping[str, Any], *, label: str) -> None:
+        nodes = list(graph["nodes"])
+        edges = list(graph["edges"])
+        index = {n["id"]: n for n in nodes}
+        if len(index) != len(nodes):
+            raise ValueError(f"duplicate AODL node id in {label}")
+        for node in nodes:
+            if node["kind"] not in AODL_NODE_KINDS:
+                raise ValueError(f"non-AODL node kind {node['kind']!r}")
+            if "harness" in node:
+                if node["kind"] != "executor":
+                    raise ValueError("AODL harness is only allowed on executor nodes")
+                if node["harness"] not in AODL_EXECUTOR_HARNESS_IDS:
+                    raise ValueError(f"unknown/non-executor AODL harness {node['harness']!r}")
+            if node["kind"] == "verifier":
+                held = {str(x).lower() for x in node.get("capabilities", [])} | {
+                    str(x).lower() for x in node.get("authorityCeiling", [])
+                }
+                if held & {"merge", "deploy", "approve"}:
+                    raise ValueError("AODL verifier cannot hold irreversible human-gate authority")
+        for edge in edges:
+            if edge["relation"] not in AODL_EDGE_RELATIONS:
+                raise ValueError(f"non-AODL edge relation {edge['relation']!r}")
+            if edge["from"] not in index or edge["to"] not in index:
+                raise ValueError("AODL edge endpoint missing")
+            fp = {p["id"]: p for p in index[edge["from"]]["ports"]}[edge["fromPort"]]
+            tp = {p["id"]: p for p in index[edge["to"]]["ports"]}[edge["toPort"]]
+            if fp["direction"] != "out" or tp["direction"] != "in":
+                raise ValueError("AODL edge port direction invalid")
+            if fp["schema"] != tp["schema"]:
+                raise ValueError("AODL edge port schemas do not match")
+            grant = {str(x).lower() for x in edge.get("authority", {}).get("grant", [])}
+            if index[edge["to"]]["kind"] == "verifier" and grant & {"merge", "deploy", "approve"}:
+                raise ValueError("AODL verifier cannot receive irreversible human-gate authority")
+            if (
+                edge["relation"] == "delegation"
+                and index[edge["from"]]["kind"] == "humanGate"
+                and index[edge["to"]]["kind"] == "executor"
+            ):
+                raise ValueError("AODL humanGate identity cannot be delegated to an executor")
+
+    _check_graph(doc["intentGraph"], label="intentGraph")
+    if "observedGraph" in doc:
+        observed = doc["observedGraph"]
+        if not isinstance(observed, Mapping):
+            raise ValueError("observedGraph must be an object")
+        _check_graph(observed, label="observedGraph")
+    allowed_events = {
+        "spawn", "bind", "route", "retry", "cancel", "addNode", "removeNode",
+        "addEdge", "removeEdge", "stateUpdate", "snapshot",
+    }
+    for event in doc.get("eventLog", []):
+        if event.get("type") not in allowed_events:
+            raise ValueError(f"unknown AODL event type {event.get('type')!r}")
     budgets = doc["constraints"].get("budgets")
     termination = doc["constraints"].get("termination")
     if not isinstance(budgets, dict) or not isinstance(termination, dict):
@@ -626,7 +699,7 @@ def runtime_contract(doc: Mapping[str, Any]) -> AodlRuntimeContract:
 
     assert_basic_aodl_invariants(doc)
     plan = doc.get("plan")
-    if not isinstance(plan, Mapping) or plan.get("compiler") != "z0int.aodl.v1":
+    if not isinstance(plan, Mapping) or plan.get("compiler") not in {"z0int.aodl.v1", "z0int.aodl.v2"}:
         raise ValueError("AODL document has no z0int compiled plan")
     route = plan.get("route")
     bindings = plan.get("bindings")
@@ -680,6 +753,7 @@ def check_budget(
         "latency_ms": projected.latency_ms,
         "usd": projected.usd,
         "joules": projected.joules,
+        "attention": projected.attention,
     }
     for key, actual in fields.items():
         limit = contract.budgets.get(key)

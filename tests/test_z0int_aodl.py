@@ -17,6 +17,7 @@ from z0int.aodl import (
     outcome_event,
     route_event,
     runtime_contract,
+    with_observed_graph,
 )
 from z0int.cascade import CascadePolicy, StagePolicy
 from z0int.routines import LiteralPredicate, RoutineCandidate, RoutineRule
@@ -41,7 +42,12 @@ class AodlBindingTests(unittest.TestCase):
     def routine(self) -> RoutineCandidate:
         return RoutineCandidate(
             capability_id="coding.needs_verification",
-            rule=RoutineRule((LiteralPredicate("prev_family", "eq", "EDIT"), LiteralPredicate("tool_ok", "eq", True))),
+            rule=RoutineRule(
+                (
+                    LiteralPredicate("prev_family", "eq", "EDIT"),
+                    LiteralPredicate("tool_ok", "eq", True),
+                )
+            ),
             output="VERIFY",
             source_specialist="mb-gen2",
             source_generation=2,
@@ -51,31 +57,40 @@ class AodlBindingTests(unittest.TestCase):
             status="promoted",
         )
 
-    def test_uses_only_existing_aodl_kinds_and_routes_by_policy(self) -> None:
+    def test_intent_contract_is_stable_and_strategy_lives_in_plan(self) -> None:
         doc = compile_aodl(
             capability_id="coding.needs_verification",
             cascade=self.cascade(),
             routines=[self.routine()],
             config=AodlBindingConfig(
                 harness_id="omp",
-                budgets=AodlBudgets(tokens=4000, premium_tokens=1000, latency_ms=1500, joules=25.0),
+                budgets=AodlBudgets(
+                    tokens=4000,
+                    premium_tokens=1000,
+                    latency_ms=1500,
+                    joules=25.0,
+                    attention=1,
+                ),
             ),
         )
         assert_basic_aodl_invariants(doc)
         kinds = {n["kind"] for n in doc["intentGraph"]["nodes"]}
         self.assertTrue(kinds <= AODL_NODE_KINDS)
-        self.assertNotIn("fly", kinds)
-        self.assertNotIn("routine", kinds)
-        self.assertNotIn("cascade", kinds)
-        self.assertIn("service", kinds)
-        self.assertIn("model", kinds)
-        order = doc["policies"]["route"]["order"]
+        self.assertEqual(kinds, {"task", "executor", "verifier", "stateStore"})
+        self.assertNotIn("service", kinds)
+        self.assertNotIn("model", kinds)
+        executor = next(n for n in doc["intentGraph"]["nodes"] if n["kind"] == "executor")
+        self.assertEqual(executor["harness"], "omp")
+        self.assertEqual(doc["policies"]["protocol"], "intent-contract")
+        self.assertNotIn("route", doc["policies"])
+        order = doc["plan"]["route"]["order"]
         self.assertEqual(order[0], "routine-service")
         self.assertEqual(order[-1], "stage-frontier")
         self.assertEqual(doc["constraints"]["budgets"]["premium_tokens"], 1000)
+        self.assertEqual(doc["constraints"]["budgets"]["attention"], 1)
         self.assertEqual(doc["constraints"]["acceptance"]["capabilityId"], "coding.needs_verification")
 
-    def test_private_implementation_binding_lives_in_plan_not_node_ontology(self) -> None:
+    def test_private_implementation_binding_lives_only_in_compiled_plan(self) -> None:
         doc = compile_aodl(
             capability_id="coding.needs_verification",
             cascade=self.cascade(),
@@ -90,24 +105,53 @@ class AodlBindingTests(unittest.TestCase):
             ),
         )
         plan = doc["plan"]
+        self.assertEqual(plan["compiler"], "z0int.aodl.v2")
+        self.assertEqual(plan["profile"], "intent-contract")
         self.assertEqual(plan["bindings"]["stage-specialist"]["uri"], "z0int://specialists/needs-verification/mb")
         self.assertEqual(plan["bindings"]["stage-specialist"]["implementationStage"], "mb")
         self.assertEqual(plan["route"]["thresholds"]["stage-specialist"], 0.95)
-        self.assertNotIn("confidenceThresholds", doc["policies"]["route"])
         self.assertEqual(plan["bindings"]["routine-registry"]["artifactType"], "z0int.routine_registry.v1")
-        # Intent nodes remain implementation-agnostic: no paths/model ids/private rules.
-        rendered_nodes = str(doc["intentGraph"]["nodes"])
-        self.assertNotIn("prev_family", rendered_nodes)
-        self.assertNotIn("Qwen", rendered_nodes)
+        rendered_intent = str(doc["intentGraph"])
+        self.assertNotIn("prev_family", rendered_intent)
+        self.assertNotIn("Qwen", rendered_intent)
+        self.assertNotIn("routine-service", rendered_intent)
+        self.assertNotIn("stage-specialist", rendered_intent)
 
-    def test_source_hash_is_deterministic_sha256(self) -> None:
-        a = compile_aodl(capability_id="coding.needs_verification", cascade=self.cascade(), routines=[self.routine()])
-        b = compile_aodl(capability_id="coding.needs_verification", cascade=self.cascade(), routines=[self.routine()])
+    def test_intent_source_hash_does_not_change_when_implementation_changes(self) -> None:
+        a = compile_aodl(
+            capability_id="coding.needs_verification",
+            cascade=self.cascade(),
+            routines=[self.routine()],
+        )
+        changed = replace(
+            self.cascade(),
+            stages=(
+                StagePolicy("mb", 0.97),
+                StagePolicy("local_slm", 0.91),
+                StagePolicy("frontier", 0.0, terminal=True),
+            ),
+        )
+        b = compile_aodl(
+            capability_id="coding.needs_verification",
+            cascade=changed,
+            routines=[],
+        )
         self.assertEqual(a["provenance"]["sourceHash"], b["provenance"]["sourceHash"])
+        self.assertNotEqual(a["plan"]["planHash"], b["plan"]["planHash"])
         self.assertRegex(a["provenance"]["sourceHash"], re.compile(r"^[a-f0-9]{64}$"))
 
-    def test_observed_route_and_outcome_are_aodl_events(self) -> None:
-        doc = compile_aodl(capability_id="coding.needs_verification", cascade=self.cascade(), routines=[self.routine()])
+    def test_observed_route_and_outcome_are_events_and_observed_graph(self) -> None:
+        doc = compile_aodl(
+            capability_id="coding.needs_verification",
+            cascade=self.cascade(),
+            routines=[self.routine()],
+        )
+        doc = with_observed_graph(doc, stage="routine-service", lifecycle="running")
+        kinds = {n["kind"] for n in doc["observedGraph"]["nodes"]}
+        self.assertEqual(kinds, {"executor", "service", "verifier"})
+        observed_executor = next(n for n in doc["observedGraph"]["nodes"] if n["kind"] == "executor")
+        self.assertEqual(observed_executor["harness"], "omp")
+
         sh = doc["provenance"]["sourceHash"]
         routed = route_event(
             trace_id="trace-1",
@@ -134,11 +178,21 @@ class AodlBindingTests(unittest.TestCase):
         self.assertEqual(observed["eventLog"][1]["causalParents"], [routed["eventId"]])
         self.assertTrue(observed["eventLog"][1]["payload"]["success"])
 
-    def test_no_routine_keeps_stable_slot_but_binding_is_disabled(self) -> None:
-        doc = compile_aodl(capability_id="coding.needs_verification", cascade=self.cascade(), routines=[])
-        self.assertEqual(doc["policies"]["route"]["order"][0], "routine-service")
-        self.assertIn("routine-service", {n["id"] for n in doc["intentGraph"]["nodes"]})
-        self.assertFalse(doc["plan"]["bindings"]["routine-service"]["enabled"])
+    def test_no_routine_keeps_compiled_slot_disabled_without_changing_intent(self) -> None:
+        with_routine = compile_aodl(
+            capability_id="coding.needs_verification",
+            cascade=self.cascade(),
+            routines=[self.routine()],
+        )
+        without = compile_aodl(
+            capability_id="coding.needs_verification",
+            cascade=self.cascade(),
+            routines=[],
+        )
+        self.assertEqual(with_routine["intentGraph"], without["intentGraph"])
+        self.assertEqual(with_routine["provenance"]["sourceHash"], without["provenance"]["sourceHash"])
+        self.assertEqual(without["plan"]["route"]["order"][0], "routine-service")
+        self.assertFalse(without["plan"]["bindings"]["routine-service"]["enabled"])
 
     def test_runtime_consumes_the_same_aodl_contract(self) -> None:
         doc = compile_aodl(
@@ -159,13 +213,13 @@ class AodlBindingTests(unittest.TestCase):
         self.assertEqual(contract.budgets["premium_tokens"], 700)
         self.assertEqual(contract.bindings["stage-specialist"]["implementationStage"], "mb")
 
-    def test_aodl_gamma_budget_is_runtime_enforced(self) -> None:
+    def test_gamma_budget_is_runtime_enforced_including_attention(self) -> None:
         doc = compile_aodl(
             capability_id="coding.needs_verification",
             cascade=self.cascade(),
             routines=[self.routine()],
             config=AodlBindingConfig(
-                budgets=AodlBudgets(tokens=500, premium_tokens=100, latency_ms=1000),
+                budgets=AodlBudgets(tokens=500, premium_tokens=100, latency_ms=1000, attention=1),
                 stage_roles={"mb": "specialist", "local_slm": "local-semantic", "frontier": "frontier"},
             ),
         )
@@ -178,15 +232,21 @@ class AodlBindingTests(unittest.TestCase):
         self.assertTrue(ok.allowed)
         blocked = check_budget(
             contract,
-            observed=AodlSpend(tokens=450, premium_tokens=90, latency_ms=900),
-            proposed=AodlSpend(tokens=100, premium_tokens=20, latency_ms=150),
+            observed=AodlSpend(tokens=450, premium_tokens=90, latency_ms=900, attention=1),
+            proposed=AodlSpend(tokens=100, premium_tokens=20, latency_ms=150, attention=1),
         )
         self.assertFalse(blocked.allowed)
-        self.assertEqual(set(blocked.exceeded), {"tokens", "premium_tokens", "latency_ms"})
+        self.assertEqual(set(blocked.exceeded), {"tokens", "premium_tokens", "latency_ms", "attention"})
         slot = binding_for_implementation_stage(contract, "mb")
         self.assertIsNotNone(slot)
         assert slot is not None
         self.assertEqual(slot[0], "stage-specialist")
+
+    def test_unknown_or_control_room_harness_fails_closed(self) -> None:
+        with self.assertRaises(ValueError):
+            AodlBindingConfig(harness_id="o8")
+        with self.assertRaises(ValueError):
+            AodlBindingConfig(harness_id="langchain")
 
 
 if __name__ == "__main__":
