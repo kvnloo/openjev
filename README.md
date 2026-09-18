@@ -78,6 +78,25 @@ openjev-eval runs/synthetic.pt data/synthetic/test.jsonl
 See [docs/jevlike-trainable-route.md](docs/jevlike-trainable-route.md) for frozen-encoder training,
 Wikispeedia, visual Doom/Chess examples (`pip install -e '.[games]'`), and bridge scoring.
 
+## Route C: vLLM DiffusionGemma (Jev-like reads)
+
+When [vLLM PR #57250](https://github.com/vllm-project/vllm/pull/57250) structured diffusion reads are
+available, score the same OpenJev JSONL through a served DiffusionGemma instead of local Qwen weights:
+
+```bash
+bash scripts/setup-vllm-diffusion.sh   # clone/checkout vLLM + print serve command
+
+openjev-score --mode vllm \
+  --upstream http://127.0.0.1:8000 \
+  --model dgemma \
+  --tokenizer nvidia/diffusiongemma-26B-A4B-it-NVFP4 \
+  --input examples/decisions.jsonl \
+  --output results-vllm.jsonl
+```
+
+See [docs/vllm-diffusion-route.md](docs/vllm-diffusion-route.md) for canvas sizing, option-letter
+constraints, and how Route C complements Route A (trainable jevlike) and Route B (direct logits).
+
 ## How it works
 
 ```mermaid

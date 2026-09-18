@@ -3,6 +3,7 @@
 No model weights or third-party raw evaluation records are distributed here.
 
 | jevlike trainable scorers | https://github.com/vinnylarouge/jevlike | `main` at port time | Route A code in `src/openjev_phase1/jevlike/`; MIT. |
+| vLLM structured diffusion reads | https://github.com/vllm-project/vllm/pull/57250 | open at port time | Route C client only; Apache-2.0 upstream. |
 | Item | Upstream | Pinned revision | Note |
 |---|---|---|---|
 | Qwen3.5-4B | https://huggingface.co/Qwen/Qwen3.5-4B | `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a` | Direct-logit baseline; check upstream model license. |

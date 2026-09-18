@@ -4,8 +4,9 @@ OpenJev ships two complementary paths:
 
 | Route | When | Tooling |
 |-------|------|---------|
-| **B — direct logit readout** | Zero-shot on a frozen 4B+ model | `openjev-score --mode direct` |
 | **A — trainable head** | You have labelled JSONL and want a small/fast scorer | `openjev-train`, `openjev-eval`, `openjev-predict` |
+| **B — direct logit readout** | Zero-shot on a frozen 4B+ model | `openjev-score --mode direct` |
+| **C — vLLM diffusion read** | Jev-like reads via served DiffusionGemma (PR [#57250](https://github.com/vllm-project/vllm/pull/57250)) | `openjev-score --mode vllm` — see [vllm-diffusion-route.md](vllm-diffusion-route.md) |
 
 Route A is ported from [vinnylarouge/jevlike](https://github.com/vinnylarouge/jevlike) (MIT) into
 `openjev_phase1.jevlike`. Same JSONL format:
