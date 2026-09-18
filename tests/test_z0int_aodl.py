@@ -8,8 +8,11 @@ from z0int.aodl import (
     AODL_NODE_KINDS,
     AodlBindingConfig,
     AodlBudgets,
+    AodlSpend,
     append_event,
     assert_basic_aodl_invariants,
+    binding_for_implementation_stage,
+    check_budget,
     compile_aodl,
     outcome_event,
     route_event,
@@ -155,6 +158,35 @@ class AodlBindingTests(unittest.TestCase):
         self.assertEqual(contract.route_order[-1], "stage-frontier")
         self.assertEqual(contract.budgets["premium_tokens"], 700)
         self.assertEqual(contract.bindings["stage-specialist"]["implementationStage"], "mb")
+
+    def test_aodl_gamma_budget_is_runtime_enforced(self) -> None:
+        doc = compile_aodl(
+            capability_id="coding.needs_verification",
+            cascade=self.cascade(),
+            routines=[self.routine()],
+            config=AodlBindingConfig(
+                budgets=AodlBudgets(tokens=500, premium_tokens=100, latency_ms=1000),
+                stage_roles={"mb": "specialist", "local_slm": "local-semantic", "frontier": "frontier"},
+            ),
+        )
+        contract = runtime_contract(doc)
+        ok = check_budget(
+            contract,
+            observed=AodlSpend(tokens=100, premium_tokens=0, latency_ms=100),
+            proposed=AodlSpend(tokens=120, premium_tokens=0, latency_ms=20),
+        )
+        self.assertTrue(ok.allowed)
+        blocked = check_budget(
+            contract,
+            observed=AodlSpend(tokens=450, premium_tokens=90, latency_ms=900),
+            proposed=AodlSpend(tokens=100, premium_tokens=20, latency_ms=150),
+        )
+        self.assertFalse(blocked.allowed)
+        self.assertEqual(set(blocked.exceeded), {"tokens", "premium_tokens", "latency_ms"})
+        slot = binding_for_implementation_stage(contract, "mb")
+        self.assertIsNotNone(slot)
+        assert slot is not None
+        self.assertEqual(slot[0], "stage-specialist")
 
 
 if __name__ == "__main__":

@@ -227,6 +227,31 @@ def _logical_stage(stage: str, config: AodlBindingConfig) -> str:
 
 
 @dataclass(frozen=True)
+class AodlSpend:
+    tokens: int = 0
+    premium_tokens: int = 0
+    latency_ms: float = 0.0
+    usd: float = 0.0
+    joules: float = 0.0
+
+    def plus(self, other: "AodlSpend") -> "AodlSpend":
+        return AodlSpend(
+            tokens=max(0, self.tokens + other.tokens),
+            premium_tokens=max(0, self.premium_tokens + other.premium_tokens),
+            latency_ms=max(0.0, self.latency_ms + other.latency_ms),
+            usd=max(0.0, self.usd + other.usd),
+            joules=max(0.0, self.joules + other.joules),
+        )
+
+
+@dataclass(frozen=True)
+class BudgetCheck:
+    allowed: bool
+    exceeded: tuple[str, ...] = ()
+    projected: AodlSpend = AodlSpend()
+
+
+@dataclass(frozen=True)
 class AodlRuntimeContract:
     """Runtime-facing view of a compiled AODL document.
 
@@ -621,6 +646,62 @@ def runtime_contract(doc: Mapping[str, Any]) -> AodlRuntimeContract:
         acceptance=dict(acceptance),
         source_hash=str(doc.get("provenance", {}).get("sourceHash") or ""),
     )
+
+
+def spend_from_decision(decision: Any) -> AodlSpend:
+    """Project a z0int cascade decision into Gamma accounting dimensions."""
+
+    return AodlSpend(
+        tokens=max(0, int(getattr(decision, "total_tokens", 0) or 0)),
+        premium_tokens=max(0, int(getattr(decision, "premium_tokens", 0) or 0)),
+        latency_ms=max(0.0, float(getattr(decision, "latency_ms", 0.0) or 0.0)),
+    )
+
+
+def check_budget(
+    contract: AodlRuntimeContract,
+    *,
+    observed: AodlSpend | None = None,
+    proposed: AodlSpend | None = None,
+) -> BudgetCheck:
+    """Fail-closed Gamma guard for cumulative z0int spend.
+
+    A missing dimension is unbounded. Declared budgets are never rewritten as
+    observed spend; callers keep the latter separately and pass it back here.
+    """
+
+    current = observed or AodlSpend()
+    delta = proposed or AodlSpend()
+    projected = current.plus(delta)
+    exceeded: list[str] = []
+    fields = {
+        "tokens": projected.tokens,
+        "premium_tokens": projected.premium_tokens,
+        "latency_ms": projected.latency_ms,
+        "usd": projected.usd,
+        "joules": projected.joules,
+    }
+    for key, actual in fields.items():
+        limit = contract.budgets.get(key)
+        if limit is None:
+            continue
+        try:
+            lim = float(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"AODL budget {key!r} must be numeric") from exc
+        if actual > lim + 1e-12:
+            exceeded.append(key)
+    return BudgetCheck(allowed=not exceeded, exceeded=tuple(exceeded), projected=projected)
+
+
+def binding_for_implementation_stage(contract: AodlRuntimeContract, stage: str) -> tuple[str, dict[str, Any]] | None:
+    """Resolve an implementation stage through the AODL compiled plan."""
+
+    for node_id in contract.route_order:
+        binding = contract.bindings.get(node_id)
+        if isinstance(binding, dict) and binding.get("implementationStage") == stage:
+            return node_id, binding
+    return None
 
 
 def _event_id(kind: str, trace_id: str, revision: int, payload: Mapping[str, Any]) -> str:

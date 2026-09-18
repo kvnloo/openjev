@@ -102,3 +102,7 @@ z0int also performs a small local invariant check so it cannot emit custom node 
 `z0int.aodl.route_event()` records the selected route (including a routine id when one compiled rule fires). `z0int.aodl.outcome_event()` records externally verified success and observed token/latency spend as a causally linked `stateUpdate`.
 
 This makes the AODL document usable as both the desired orchestration contract and the anchor for observed `O_t`, without making AODL itself a scheduler or training runtime.
+## Gamma runtime enforcement
+
+`runtime_contract()` consumes the same compiled AODL document back into z0int. `check_budget()` evaluates cumulative observed + proposed spend against `constraints.budgets`; missing budget dimensions remain unbounded, while an exceeded declared dimension fails closed. This keeps declared Gamma separate from observed spend while making the contract operational rather than decorative.
+
