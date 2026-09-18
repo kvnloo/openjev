@@ -1353,19 +1353,22 @@ DONE (2026-09-17, evolution-lab nightly b9e4db5)
   10. gpu-abab: A mutates DataRecipe, B trains P=256, keep iff GPU>ridge+1pp and majority
       8 waves, 2 keeps (wave 4 n=16384; wave 5 full split).
 
-NOW / DONE (2026-09-17 safe coverage)
+NOW / DONE (2026-09-17 safe coverage + weak-family probe)
   9. shadow + confidence/abstain cascade on wave-5 champion
      - wave-5 pack locked: n_kc=96 k_winners=20 pn_dim=64 confirm=0.572 (beats ridge 0.363)
-     - promote-only writes: weaker GPU runs no longer clobber `data/next_action/champion.*`
-     - CLI: `next-action-confirm`, `next-action-shadow`, `next-action-decide`, `next-action-coverage`
-     - policy `data/next_action/coverage_policy.json`: high-conf EXECUTE (p≥0.60, margin≥0.30) and
-       DELEGATE (p≥0.40) → local; else escalate → Jev (fallback OpenJev)
-     - confirm coverage eval: cov≈0.196, local_prec≈0.669 (EXEC n=2931 prec≈0.664; DEL n=81 prec≈0.864)
-     - OMP extension `flyforge-jev`: log-only cascade rows → `~/.z0int/shadow/jev-fly.jsonl`
-  persist data/next_action/champion.{npz,json} + coverage_policy.json
+     - promote-only writes; champion.npz gitignored + history-scrubbed (local only)
+     - CLI: confirm/shadow/decide/coverage + `next-action-weak`
+     - policy: high-conf EXECUTE (p≥0.60, margin≥0.30) + DELEGATE (p≥0.40) → local; else → Jev
+     - coverage eval: cov≈0.196 local_prec≈0.669; shadow ≥120 cascade rows (local+escalate)
+  10b. weak-family oversample search (EDIT/WEB/VERIFY/ABSTAIN boost∈{1,2,4,8}, frozen arch)
+     - best overall gpu=0.380 < champion 0.572 → **no promote** (gate held)
+     - boost↑ lifts EDIT/WEB (EDIT→0.42, WEB→0.42 at ×8) but collapses DELEGATE→0 and overall
+     - conclusion: need better labels/features for weak families, not naive oversample
 
-LATER
-  11. Memento / FlyGym
+LATER (needs Kevin or new signal)
+  11. gold/disagree labels for EDIT+WEB, or new PN features — blocking useful weak-family lift
+  12. Memento / FlyGym / MaleCNS — only after local safe-coverage prec meaningfully improves
+
 ```
 
 Do **not** start with FlyGym, full MaleCNS hot-path, or a 5B SLM as the fly executor.
