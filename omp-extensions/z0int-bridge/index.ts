@@ -420,19 +420,14 @@ async function closeFromMessages(messages: unknown[], source: string): Promise<J
 	if (last.closed === true) return { ok: true, already_closed: true, trace_id: last.trace_id };
 	const tid = last.trace_id as string;
 	if (closingTraces.has(tid)) return { ok: true, already_closed: true, trace_id: tid };
-	closingTraces.add(tid);
-	try {
-		return await closeOpenTurn({
-			measured: est.measured,
-			inputTokens: est.input_tokens,
-			outputTokens: est.output_tokens,
-			success: true,
-			toolOk: true,
-			source,
-		});
-	} finally {
-		// keep in set so agent_end after turn_end is a no-op
-	}
+	return closeOpenTurn({
+		measured: est.measured,
+		inputTokens: est.input_tokens,
+		outputTokens: est.output_tokens,
+		success: true,
+		toolOk: true,
+		source,
+	});
 }
 
 export default function z0intBridge(pi: ExtensionAPI) {
