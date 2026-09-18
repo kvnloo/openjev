@@ -17,6 +17,7 @@ const STREAM = join(Z0, "stream", "bridge.jsonl");
 const SHADOW = join(Z0, "shadow", "preflight.jsonl");
 const OPEN = join(Z0, "stream", "open_turns.jsonl");
 const LAST = join(Z0, "stream", "last_open.json");
+const HEART = join(Z0, "stream", "bridge_heart.jsonl");
 
 const PY =
 	process.env.EVOLUTION_LAB_PYTHON ||
@@ -352,21 +353,32 @@ async function closeOpenTurn(opts: {
 export default function z0intBridge(pi: ExtensionAPI) {
 	pi.setLabel("z0int preflight → Kerdoios residual → close (log-only)");
 
-	pi.on("before_agent_start", async (event, ctx) => {
+	pi.on("before_agent_start", (event, ctx) => {
 		const prompt =
 			event && typeof event === "object" && "prompt" in event
 				? String((event as { prompt?: unknown }).prompt ?? "").trim()
 				: "";
-		if (!prompt || prompt.startsWith("/")) return;
 		const sessionId =
 			ctx && typeof ctx === "object" && "sessionId" in ctx
 				? String((ctx as { sessionId?: unknown }).sessionId ?? "")
 				: process.env.OMP_SESSION_ID;
+		// Sync heartbeat: proves the handler ran even if async work fails.
 		try {
-			await turnBridge(prompt, sessionId || undefined);
+			append(HEART, {
+				schema: "z0int.bridge_heart.v1",
+				ts: Date.now() / 1000,
+				session_id: sessionId || null,
+				prompt_len: prompt.length,
+				prompt_head: prompt.slice(0, 120),
+				skipped: !prompt || prompt.startsWith("/"),
+			});
 		} catch {
-			return;
+			/* */
 		}
+		if (!prompt || prompt.startsWith("/")) return;
+		// Fire-and-forget: do not block the agent turn on preflight/kerdoios.
+		void turnBridge(prompt, sessionId || undefined).catch(() => undefined);
+		return;
 	});
 
 	pi.on("agent_end", async (event) => {
