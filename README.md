@@ -1,26 +1,221 @@
-# OpenJev
+# z0int
 
-<div align="center">
+**Personal intelligence that learns how you work, so your frontier models do less.**
 
-**Can we run something like Jev on a 3090 at home?**
+z0int is evolving from an open Jev-style decision runtime into a private, personalized intelligence layer for agentic systems.
 
-**Wow! No waitlist.** [Run it in your browser today.](https://openjev.com)
+The long-term goal is not to train one giant model on a person's life. It is to turn a user's own history into a hierarchy of tiny, verifiable specialists that understand recurring intent, retrieve the right identity/context, make bounded decisions, and offload repetitive work from expensive LLMs.
 
-[![Measured replay: typed decisions appear together while JSON streams token by token](demo/assets/openjev-phase1-replay.gif)](demo/index.html)
+Today, this repository contains the OpenJev runtime and benchmark substrate: typed probabilistic decisions, direct logit readout, trainable scorers, shared-state reuse, and integration with [Evolution Lab](https://github.com/kvnloo/evolution-lab). The personalization and onboarding system described below is the roadmap, not a claim that all of it is implemented today.
 
-*Same frozen 4B model · same state · same 21 questions · measured separately, aligned at t=0 in the replay*
+See [ROADMAP.md](ROADMAP.md) for the staged build.
 
-</div>
+## Why
 
-![Some AI company asks you to join a waitlist; OpenJev runs in your browser today](assets/openjev-no-waitlist.png)
+Your LLM should not have to rediscover who you are, what you care about, how you work, and which routine action to take on every turn.
 
-Most agent decisions are small: *route this*, *retry that*, *does the evidence support X?* A chat model can answer them, but it spends time generating text that software immediately parses back into an `if` statement.
+Most of that information already exists across years of conversations, projects, messages, tool traces, and decisions. z0int aims to compile that history into two complementary layers:
 
-Jev is TypeSafe's closed service for runtime-defined semantic decisions. This project reproduces that **interface pattern** with open models; it does not reproduce Jev's undisclosed model or training.
+- **retrieval-backed personal context** for mutable facts, current projects, relationships, documents, and provenance;
+- **small learned policies** for stable preferences, judgment, intent resolution, routing, tool selection, recovery, verification, and other repeated bounded decisions.
 
-This baseline reads typed option probabilities directly from a model. No answer sentence, JSON repair, or decoding loop.
+The result should be a system where the frontier LLM spends its compute on genuinely novel reasoning instead of repeatedly reconstructing the same context.
 
-## Quick start
+```text
+raw user request
+      |
+      v
+private context + identity retrieval
+      |
+      v
+z0int specialists
+  |       |       |
+  |       |       +--> temporal / recovery fly
+  |       +----------> mushroom-body decision head
+  +------------------> local semantic scorer
+      |
+      +--> confident: act / route / compress context
+      |
+      +--> uncertain: Jev / stronger local model
+      |
+      +--> hard tail: frontier LLM
+```
+
+## Onboarding: bring your history
+
+z0int is designed around **data-complete onboarding** rather than a short preference questionnaire. The goal is to import as much of your user-owned digital history as you can safely and legally export, preserve provenance, and let the training/retrieval pipeline discover what is actually useful.
+
+Recommended sources include:
+
+- **GitHub**: repositories, commits, issues, pull requests, reviews, discussions, and other development history;
+- **Google**: Google Takeout data such as Search/Chrome history, Drive documents, Gmail, Calendar, and other relevant exports;
+- **messages**: personal chat archives from the services you use, with third-party/private content handled conservatively;
+- **LLM conversation history**: ChatGPT data export, Claude conversation export, and conversations from other assistants;
+- **agent harness history**: Hermes, OMP, Pi, Codex, Claude Code, Cursor, OpenCode, and other harness traces where available;
+- **Hermes state**: especially `state.db`, session/tool history, memories, outcomes, recovery events, and other local state that can be safely parsed;
+- **future computer-use history**: screen/action traces from tools such as [Memento](https://github.com/kvnloo/Memento), collected prospectively with privacy filtering.
+
+The onboarding target is comprehensive context, but **not every byte belongs in model weights**.
+
+### Privacy boundary
+
+Raw personal data should stay private and local by default.
+
+- Secrets, credentials, raw environment variables, payment data, and other sensitive values must be filtered or excluded.
+- Mutable personal facts and current project state should stay retrieval-backed instead of being memorized into weights.
+- Personalized corpora and personalized checkpoints should not be committed to this public repository.
+- External training services should receive only explicitly sanitized, non-PII training material.
+- Every derived training example should retain source/provenance so it can be excluded, rebuilt, or invalidated later.
+
+This carries forward the core idea from the earlier private `sft-svlm` project: **learn how the user thinks; retrieve what is currently true.**
+
+## From `sft-svlm` to z0int
+
+The earlier `sft-svlm` idea was a personalized SLM/SVLM that could learn stable user behavior from personal history and help compile messy requests into better instructions for powerful workers.
+
+z0int keeps that thesis but decomposes it further.
+
+Instead of assuming one personal model should absorb everything:
+
+```text
+personal history
+      |
+      +--> retrieval memory --------> current facts / projects / provenance
+      |
+      +--> z0int training ----------> stable intent / preference / routing policies
+      |
+      +--> Evolution Lab -----------> specialist population
+```
+
+The model layer becomes an **army of specialists**, each earning production traffic through measurement.
+
+## From history to training signal
+
+z0int should not require a giant manual labeling project.
+
+Existing histories already contain weak or strong supervision:
+
+| Source | Useful signal |
+| --- | --- |
+| Harness traces | tool/action chosen, retry, model route, success/error |
+| GitHub | edit -> test -> review -> merge/reject outcomes |
+| Jev / typed judges | soft probability distributions over bounded choices |
+| Conversations | corrections, follow-ups, accepted/rejected directions |
+| Hermes state | recurring workflows, recovery actions, session outcomes |
+| Memento going forward | screen state -> human/agent action -> next state |
+
+The training pipeline should compile these into versioned episodes rather than dumping raw chat logs directly into SFT.
+
+```text
+context / observation
+      |
+      v
+bounded decision or action
+      |
+      v
+result / verifier / downstream outcome
+      |
+      v
+training episode
+```
+
+Human labeling should be reserved for high-information cases such as disagreements, ambiguous outcomes, or novel workflows.
+
+## Mushroom bodies + an army of flies
+
+[Evolution Lab](https://github.com/kvnloo/evolution-lab) is the experiment engine for turning those episodes into small specialists.
+
+The first production target is the **mushroom-body-style learner** already explored in FlyForge: sparse expansion, k-winner coding, and a tiny plastic readout for bounded decisions.
+
+Over time, z0int should train an **army of flies**, each optimized for a narrow repeated process rather than one universal student:
+
+- intent and skill routing;
+- tool-family selection;
+- context retrieval and compression;
+- retry / recover / escalate decisions;
+- verification and completion checks;
+- model / effort routing;
+- temporal computer-use state and action prediction;
+- personalized preference and workflow decisions.
+
+Richer fly / MaleCNS-derived circuits can be used as temporal research substrates, but production promotion is results-driven: if a simpler mushroom-body, ridge, MLP, or deterministic rule is faster and equally correct, the simpler system wins.
+
+## Identity and context offload
+
+The long-term product is a personal intelligence layer that can answer questions such as:
+
+- What is the user actually trying to accomplish?
+- Which prior project, conversation, or preference matters here?
+- What information is stable identity versus a mutable current fact?
+- Which context should the frontier model see, and which context can be compressed away?
+- Which routine decision can be handled locally without invoking the frontier model?
+- When should the system abstain and escalate?
+
+This is where z0int can reduce context pressure on large models. Instead of shipping a lifetime of history into every prompt, local specialists can select, summarize, route, or act on the small slice that matters.
+
+## Intent and AODL
+
+[AODL](https://github.com/kvnloo/aodl) is a complementary typed language/IR for describing agent orchestration graphs.
+
+z0int does **not** depend on AODL to train or run. Results come first. But AODL can become useful as a shared representation for intent once the behavior is working:
+
+```text
+natural-language request
+        |
+        v
+z0int: infer intent / constraints / relevant identity
+        |
+        v
+AODL: typed intent + topology + budgets + authority
+        |
+        v
+Hermes / OMP / other runtime
+```
+
+The useful connection is not adding a `fly` node kind. It is using personalized learned policies to help **decode messy human language into a more explicit intent representation**, while AODL provides a portable vocabulary for the resulting orchestration.
+
+## Evolution Lab
+
+z0int supplies runtime scorers and training surfaces. [Evolution Lab](https://github.com/kvnloo/evolution-lab) owns the empirical search loop:
+
+```text
+personal episodes
+     |
+     v
+candidate dataset recipe + model genome
+     |
+     v
+train / distill / DAgger
+     |
+     v
+frozen replay + verifier
+     |
+     v
+keep / discard
+     |
+     v
+shadow traffic
+     |
+     v
+promote verified winner
+```
+
+The ABAB meta-loop can evolve both **what data to train on** and **which architecture to use**. The benchmark, privacy boundary, and sealed evaluation set stay outside the evolvable surface.
+
+## Current foundation: OpenJev
+
+The code in this repository currently reproduces the useful *interface pattern* of TypeSafe Jev with open components. It does not reproduce Jev's undisclosed model or training.
+
+Current capabilities include:
+
+- runtime-defined typed options;
+- generation-free direct-logit scoring;
+- shared-state prefix reuse;
+- trainable one-pass option scorers;
+- frozen benchmark/evaluation bundles;
+- integration with Evolution Lab and FlyForge.
+
+### Quick start
 
 Python 3.10+, CUDA, and a GPU that can hold a 4B BF16 model:
 
@@ -29,11 +224,7 @@ python -m venv .venv
 . .venv/bin/activate
 export HF_HOME=/path/to/large-drive/huggingface
 pip install -e '.[test]'
-```
 
-Run the owned examples:
-
-```bash
 CUDA_VISIBLE_DEVICES=0 openjev-score \
   --mode direct \
   --model Qwen/Qwen3.5-4B \
@@ -42,150 +233,34 @@ CUDA_VISIBLE_DEVICES=0 openjev-score \
   --output results.jsonl
 ```
 
-Each result contains typed option scores, timing, the exact model revision, and a prompt hash.
+On the committed RTX 3090 benchmark, direct typed logits returned 21 probability pairs in a median **1.023 s** versus **5.332 s** for the compact autoregressive JSON-array baseline. See [docs/RESULTS.md](docs/RESULTS.md), [docs/METHOD.md](docs/METHOD.md), and the committed raw results for the exact scope and limitations.
 
-If every row has the same exact state, switch to `--mode shared` to prefill it once and evaluate the criteria in parallel.
+## Repository map
 
-## FlyForge stack (OpenJev + Evolution Lab)
+- [ROADMAP.md](ROADMAP.md) - long-term z0int build order
+- [docs/evolution-lab.md](docs/evolution-lab.md) - current FlyForge integration
+- [docs/RESULTS.md](docs/RESULTS.md) - measured OpenJev results
+- [docs/METHOD.md](docs/METHOD.md) - frozen evaluation methodology
+- [benchmarks/](benchmarks/) - reproducible benchmark fixtures
+- [src/openjev_phase1/](src/openjev_phase1/) - current scoring/runtime implementation
 
-**Clone openjev first.** This repo sets up the runtime: typed JEV decisions, optional SLM
-scorers, and Route A/B tooling. When you want to **evolve** fly-style specialists (Hermes
-recovery, JEV routing heads), add [Evolution Lab](https://github.com/kvnloo/evolution-lab)
-on top — it orchestrates genomes, locked splits, promotion, and DAgger; OpenJev remains the
-inference substrate.
+## Principles
 
-```bash
-bash scripts/setup-flyforge.sh
-# → installs OpenJev, clones evolution-lab @ nightly, locks splits, prints smoke commands
-```
+1. **Results first.** New theory or architecture must earn its place through measured downstream improvement.
+2. **Private by default.** Raw personal history is a local asset, not public training data.
+3. **Retrieve facts, learn behavior.** Stable preferences/policies may be learned; mutable truth stays provenance-backed.
+4. **Specialize aggressively.** Tiny verified specialists should replace repeated expensive reasoning where they can.
+5. **Abstain instead of bluffing.** Low-confidence cases escalate to stronger systems.
+6. **Keep the controls.** Ridge, MLP, deterministic rules, and other simple baselines remain mandatory.
+7. **Evolution changes implementations, not the judge.** Frozen evaluation and privacy constraints are not optimization variables.
 
-See [docs/evolution-lab.md](docs/evolution-lab.md) for the full contract (Track A recovery fly,
-Track B JEV heads, export paths, token-saving stack).
+## Related projects
 
-## Route A: trainable scorers (jevlike port)
+- [Evolution Lab](https://github.com/kvnloo/evolution-lab) - genomes, DAgger, Pareto/MAP-Elites, autoresearch and ABAB
+- [AODL](https://github.com/kvnloo/aodl) - typed intent/orchestration IR
+- [frontier-kb](https://github.com/kvnloo/frontier-kb) - research memory and claims
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) - runtime, state, tools, messaging and learning surfaces
+- [Oh My Pi](https://github.com/can1357/oh-my-pi) - fast coding harness and judgment/decision surfaces
+- [Memento](https://github.com/kvnloo/Memento) - prospective private computer-use history source
 
-When zero-shot direct readout is not enough, train a small one-pass option head on labelled JSONL
-(ported from [jevlike](https://github.com/vinnylarouge/jevlike), MIT):
-
-```bash
-pip install -e '.[test]'
-openjev-data synthetic --output data/synthetic
-openjev-train data/synthetic/train.jsonl --validation data/synthetic/validation.jsonl \
-  --output runs/synthetic.pt --device cuda
-openjev-eval runs/synthetic.pt data/synthetic/test.jsonl
-```
-
-See [docs/jevlike-trainable-route.md](docs/jevlike-trainable-route.md) for frozen-encoder training,
-Wikispeedia, visual Doom/Chess examples (`pip install -e '.[games]'`), and bridge scoring.
-
-## Route C: vLLM DiffusionGemma (Jev-like reads)
-
-When [vLLM PR #57250](https://github.com/vllm-project/vllm/pull/57250) structured diffusion reads are
-available, score the same OpenJev JSONL through a served DiffusionGemma instead of local Qwen weights:
-
-```bash
-bash scripts/setup-vllm-diffusion.sh   # clone/checkout vLLM + print serve command
-
-openjev-score --mode vllm \
-  --upstream http://127.0.0.1:8000 \
-  --model dgemma \
-  --tokenizer nvidia/diffusiongemma-26B-A4B-it-NVFP4 \
-  --input examples/decisions.jsonl \
-  --output results-vllm.jsonl
-```
-
-See [docs/vllm-diffusion-route.md](docs/vllm-diffusion-route.md) for canvas sizing, option-letter
-constraints, and how Route C complements Route A (trainable jevlike) and Route B (direct logits).
-
-## How it works
-
-```mermaid
-flowchart LR
-    S[Unstructured state] --> M[4B model]
-    C[Runtime criteria] --> M
-    O[Typed options] --> M
-    M -- native option logits --> P[Probabilities]
-```
-
-- **Runtime-defined:** criteria and option descriptions arrive with the request.
-- **Decision-native:** one forward pass reads declared option logits; no answer token is sampled.
-- **Shared-state aware:** one long state can be prefetched once, then branched across many criteria.
-- **Auditable:** the owned fixture, exact runners, row-level outputs, revisions, prompts, and known failures are committed.
-
-## Speed
-
-### Decisions versus a compact generated array
-
-Same frozen Qwen3.5-4B, same owned state, same 21 binary criteria, one RTX 3090:
-
-| Output path | Time | Output tokens | Result |
-|---|---:|---:|---|
-| Direct typed logits, median of 3 | **1.023 s** | **0** | 21 probability pairs |
-| Autoregressive JSON array, median of 3 | 5.332 s | 111 | Valid ordered 21-value array |
-
-The compact generative baseline emits only ordered `"yes"`/`"no"` values—no keys, confidence objects, or explanations. Its median first-token time was 0.489 s, but completing the array took **5.21×** as long as direct readout. All three arrays were valid and identical. Their choices agreed with direct argmax on 18/21 criteria, so this is a systems comparison rather than a claim that the two readouts are semantically equivalent. [Exact prompt, outputs, token timeline, and runs](results/raw/decision-vs-compact-array.json) are committed.
-
-### Reusing a state across 21 decisions
-
-On an owned 37-state × 21-criterion workload:
-
-| Execution path | Decisions/s | 777 decisions |
-|---|---:|---:|
-| Fresh direct scoring | 2.33 | 333.1 s |
-| Serial prefix reuse | 10.75 | 72.3 s |
-| Parallel suffixes | **20.03** | **38.8 s** |
-| Native reranker | 1.86 | 417.3 s |
-
-The owned [37×21 fixture](benchmarks/data/shape777.jsonl), [direct/reuse runner](benchmarks/shape777.py), [reranker runner](benchmarks/shape777_reranker.py), [raw timings](results/raw/shape777-direct.json), and [row-level predictions](results/raw/shape777-direct.predictions.jsonl) are included. The fast reuse paths are experimental: BF16 execution changed 5–6 of 777 argmaxes relative to fresh scoring.
-
-## Quality
-
-| Frozen workload | Rows | Direct logits | Native reranker | Published Jev |
-|---|---:|---:|---:|---:|
-| Authored decisions, balanced accuracy | 144 | **0.813** | 0.625 | — |
-| WANLI, balanced accuracy | 256 | **0.637** | 0.522 | — |
-| TypeSafe selected subset, modal agreement | 102 across 20 cases | **0.845** | 0.560 | 0.883 |
-| Every judgment grid, accuracy | 36 | **0.806** | 0.694 | — |
-
-The reranker remained strong at retrieval ranking, but direct logits were the better general-decision baseline.
-
-The Jev number is read from TypeSafe's published records; we did not run a live Jev endpoint. The comparison covers the 102 rows that could be aligned from public artifacts, not TypeSafe's reported 711-row aggregate.
-
-## Input
-
-```json
-{
-  "id": "route-1",
-  "state": "Customer cannot access an account after a password reset.",
-  "question": "Which queue should handle this request?",
-  "options": [
-    {"id": "access", "description": "Account access support."},
-    {"id": "billing", "description": "Billing support."}
-  ]
-}
-```
-
-Returned probabilities are conditional on the supplied options. Calibrate and validate them on the workload where they will make decisions.
-`state` may also be a nonempty JSON object or array. Direct modes preserve it as structured JSON; reranker mode renders it as document text.
-
-## Documentation
-
-- [Evolution Lab integration](docs/evolution-lab.md) — FlyForge setup, evolve fly specialists, deploy winners
-- [Results](docs/RESULTS.md) — quality, speed, perturbations, and claim boundaries
-- [Method](docs/METHOD.md) — frozen prompts, metrics, and timing scope
-- [Reproduce](docs/REPRODUCE.md) — exact environment, pinned commands, perturbations, and verification
-- [Interactive replay](demo/index.html)
-- [Browser-only WebGPU demo](webgpu-demo/index.html) — no waitlist; use it today
-- [Machine-readable summary](results/phase1-summary.json)
-- [Benchmark bundle](benchmarks/README.md) — fixtures, runners, selection IDs, and reproduction commands
-- [Raw results and checksums](results/raw/)
-- [Third-party sources](THIRD_PARTY.md)
-
-## Evaluation sources
-
-- [TypeSafe public evaluations](https://evals.typesafe.ai/) — public comparison cases used for selected-subset agreement
-- [Every parallel judgment lab](https://typesafe-parallel-judgment-lab.every-4573.chatgpt.site/) and its [downloadable experiment data](https://typesafe-parallel-judgment-lab.every-4573.chatgpt.site/downloads/experiments.json)
-- [WANLI](https://huggingface.co/datasets/alisawuffles/WANLI) — external natural-language inference check
-- [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B) and [Qwen3-Reranker-4B](https://huggingface.co/Qwen/Qwen3-Reranker-4B) — frozen baseline models
-
-This is an independent research project. Model weights and third-party records without a redistribution grant are excluded; immutable selection IDs and fetch manifests are included. Upstream models retain their licenses. Project code is released under the [MIT License](LICENSE).
+This repository is an independent research project. Upstream components retain their licenses. Project code is released under the [MIT License](LICENSE).
