@@ -1,0 +1,51 @@
+{
+  "schema": "z0int.models.v1",
+  "models": {
+    "openjev_06b": {
+      "hf": "Qwen/Qwen3-0.6B",
+      "revision": "c1899deebe5c9af36d47b04d0214f765e99987a8",
+      "min_vram_gb": 2,
+      "dtype": "bfloat16",
+      "roles": ["cheap_teacher", "system_one", "skill_route"],
+      "resident_preferred": true
+    },
+    "openjev_4b": {
+      "hf": "Qwen/Qwen3.5-4B",
+      "revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+      "min_vram_gb": 10,
+      "dtype": "bfloat16",
+      "roles": ["semantic_teacher", "fallback", "direct_option_logits"],
+      "resident_preferred": false,
+      "note": "Do not co-reside with openjev_06b on 12GB."
+    },
+    "reranker_4b": {
+      "hf": "Qwen/Qwen3-Reranker-4B",
+      "revision": "22e683669bc0f0bd69640a1354a6d0aebcfeede5",
+      "min_vram_gb": 10,
+      "dtype": "bfloat16",
+      "roles": ["native_reranker"],
+      "optional": true
+    },
+    "local_mb": {
+      "type": "generated",
+      "min_vram_gb": 0,
+      "roles": ["specialist", "next_action", "recovery"],
+      "note": "Trained by evolution-lab / z0int train; weights under ~/.z0int/specialists"
+    }
+  },
+  "policies": {
+    "twelve_gb": {
+      "resident": ["openjev_06b", "local_mb"],
+      "on_demand": ["openjev_4b"],
+      "never_coreside": [["openjev_06b", "openjev_4b"]]
+    },
+    "cpu_only": {
+      "resident": ["local_mb"],
+      "on_demand": []
+    },
+    "high_vram": {
+      "resident": ["openjev_4b", "local_mb"],
+      "on_demand": ["openjev_06b"]
+    }
+  }
+}

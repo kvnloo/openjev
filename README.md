@@ -43,6 +43,18 @@ z0int specialists
 
 ## Onboarding: bring your history
 
+**Start here for install/setup:** [docs/ONBOARDING.md](docs/ONBOARDING.md).
+
+```bash
+./scripts/bootstrap.sh     # venv + editable install + doctor
+z0int onboard --auto       # resumable; safe to re-run
+z0int status
+z0int doctor --json        # agents consume JSON, not prose
+```
+
+Agents: prefer the `z0int` CLI over reproducing setup from memory
+(`skills/z0int-onboard/SKILL.md`, `AGENTS.md`, `CLAUDE.md`).
+
 z0int is designed around **data-complete onboarding** rather than a short preference questionnaire. The goal is to import as much of your user-owned digital history as you can safely and legally export, preserve provenance, and let the training/retrieval pipeline discover what is actually useful.
 
 Recommended sources include:
@@ -55,7 +67,7 @@ Recommended sources include:
 - **Hermes state**: especially `state.db`, session/tool history, memories, outcomes, recovery events, and other local state that can be safely parsed;
 - **future computer-use history**: screen/action traces from tools such as [Memento](https://github.com/kvnloo/Memento), collected prospectively with privacy filtering.
 
-The onboarding target is comprehensive context, but **not every byte belongs in model weights**.
+The onboarding target is comprehensive context, but **not every byte belongs in model weights**. Personalized state lives under **`~/.z0int/`** only.
 
 ### Privacy boundary
 
@@ -68,6 +80,7 @@ Raw personal data should stay private and local by default.
 - Every derived training example should retain source/provenance so it can be excluded, rebuilt, or invalidated later.
 
 This carries forward the core idea from the earlier private `sft-svlm` project: **learn how the user thinks; retrieve what is currently true.**
+
 
 ## From `sft-svlm` to z0int
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap the FlyForge stack: OpenJev (runtime) + Evolution Lab (evolve).
-# Run from the openjev repository root.
-set -euo pipefail
+# Prefer `z0int onboard` for new user-facing setup (docs/ONBOARDING.md).
+# Run from the openjev / z0int repository root.
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -79,9 +79,12 @@ python -c "import evolution_lab; print('  evolution_lab:', evolution_lab.__file_
 python -m unittest discover -s "$EVOLUTION_LAB_DIR/tests" -p 'test_jev*.py' -p 'test_openjev*.py' -q 2>/dev/null || \
   echo "  (optional Jev tests skipped or failed — install CUDA torch for full Track B)"
 
+banner "z0int doctor (user-facing lifecycle)"
+python -m z0int doctor 2>/dev/null || true
+
 cat <<EOF
 
-FlyForge stack ready.
+FlyForge stack ready. Prefer \`z0int onboard\` / docs/ONBOARDING.md for product setup.
 
 Run decisions (OpenJev):
   openjev-score --mode direct --model Qwen/Qwen3.5-4B \\
