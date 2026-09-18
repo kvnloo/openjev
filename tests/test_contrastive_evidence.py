@@ -123,7 +123,23 @@ class WorkspaceSnapshotTests(unittest.TestCase):
         fam = family_from_workspace_snapshot(snap)
         assert fam is not None
         out = evaluate_family(fam)
-        self.assertTrue(out["conditions"]["original"]["ok"])
+
+    def test_workspace_relevant_edit_flips(self) -> None:
+        snap = {
+            "project": "z0intelligence",
+            "repo_head": "abc123",
+            "rfc_revision": 3,
+            "superseded": False,
+            "open_pr": 10,
+            "changed_files": ["src/z0int/contrastive_evidence.py"],
+            "session": "s1",
+        }
+        fam = family_from_workspace_snapshot(snap)
+        assert fam is not None
+        assert fam.answer_original == "rev-3"
+        assert fam.answer_after_relevant_edit == "rev-4"
+        out = evaluate_family(fam)
+        self.assertTrue(out["conditions"]["relevant_edit"]["ok"])
 
 
 class ContrastiveAutoresearchJobTests(unittest.TestCase):

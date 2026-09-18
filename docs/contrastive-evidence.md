@@ -41,3 +41,20 @@ P(entire contrast family correct) = full_family_pass_rate
 `EvidenceDependency` records `requires`, `invariants`, `invalidated_by`, `fastest_recipe` for semantic cache invalidation.
 
 `curation_accepted` ≠ `verified_success`.
+
+## Workspace loop (P0)
+
+```text
+REAL ACTION → workspace-copilot observes
+           → z0int context-state compile [--store]
+           → contrast family + EvidenceDependency
+           → autoresearch data-recipe race
+           → Tokenomics measures recipe cost / future savings
+```
+
+```bash
+workspace-copilot context-snapshot --json
+workspace-copilot context-snapshot --json --store   # compile + append family
+z0int contrastive race --families-jsonl ~/.z0int/context_families/context.current_project_state.jsonl
+```
+

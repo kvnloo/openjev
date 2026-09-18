@@ -36,11 +36,20 @@ def family_from_workspace_snapshot(snapshot: dict[str, Any]) -> ContrastFamily |
         return None
     superseded = bool(snapshot.get("superseded", False))
     try:
-        answer = f"rev-{int(rfc_rev)}"
+        rev_int = int(rfc_rev)
     except (TypeError, ValueError):
         return None
+    contrast_rev = snapshot.get("rfc_revision_contrast", rev_int + 1)
+    try:
+        contrast_rev = int(contrast_rev)
+    except (TypeError, ValueError):
+        contrast_rev = rev_int + 1
     if superseded:
         answer = "SUPERSEDED"
+        answer_after = "SUPERSEDED"
+    else:
+        answer = f"rev-{rev_int}"
+        answer_after = f"rev-{contrast_rev}"
 
     evidence = [
         EvidenceItem(
@@ -77,8 +86,13 @@ def family_from_workspace_snapshot(snapshot: dict[str, Any]) -> ContrastFamily |
         question=f"What is the current accepted state for project {project}?",
         evidence=evidence,
         answer_original=answer,
-        answer_after_relevant_edit=answer,
-        relevant_edit={"evidence_id": "repo_head", "fact": "rfc_revision", "value": int(rfc_rev)},
+        answer_after_relevant_edit=answer_after,
+        relevant_edit={
+            "evidence_id": "repo_head",
+            "fact": "rfc_revision",
+            "value": contrast_rev,
+            "text_suffix": f"(HEAD still {head or 'unknown'})",
+        },
         necessary_ids=["repo_head", "supersede"],
         invariant_ids=[e.id for e in evidence if not e.necessary],
         invalidated_by=["git_head_change", "pr_update", "superseding_decision"],
@@ -126,6 +140,39 @@ def evaluate_and_store(family: ContrastFamily, recipe: dict[str, Any] | None = N
     path = store_dependency(dep)
     out["dependency_path"] = str(path)
     return out
+
+
+def families_jsonl_path(root: Path | None = None) -> Path:
+    from z0int import paths
+
+    home = paths.home() if root is None else root
+    d = home / "context_families"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "context.current_project_state.jsonl"
+
+
+def append_family_jsonl(family: ContrastFamily, *, path: Path | None = None) -> Path:
+    """Append one compiled contrast family for cohort races / autoresearch."""
+    out = path or families_jsonl_path()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(family.to_dict(), sort_keys=True) + "\n")
+    return out
+
+
+def compile_and_store(snapshot: dict[str, Any], *, label: str | None = None) -> dict[str, Any]:
+    """Compile workspace snapshot → episode + stored contrast family."""
+    ep = compile_episode(snapshot, label=label)
+    if not ep.get("family_id"):
+        return {"ok": False, **ep}
+    fam = family_from_workspace_snapshot(snapshot)
+    if fam is None:
+        return {"ok": False, "reason": "family_build_failed", "episode": ep}
+    fam_path = append_family_jsonl(fam)
+    ep["ok"] = True
+    ep["family_path"] = str(fam_path)
+    ep["family"] = fam.to_dict()
+    return ep
 
 
 def load_families_jsonl(path: Path | str) -> list[ContrastFamily]:

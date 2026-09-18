@@ -521,6 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(cps_fx)
     cps_cmp = cps_sub.add_parser("compile", help="Compile episode from workspace snapshot JSON")
     cps_cmp.add_argument("snapshot_json")
+    cps_cmp.add_argument("--store", action="store_true", help="append contrast family JSONL")
     _json_flag(cps_cmp)
 
     ar = sub.add_parser("autoresearch", help="Verified Trajectory Superoptimizer")
@@ -893,8 +894,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.context_state_cmd == "compile":
             snap = _json.loads(Path(args.snapshot_json).read_text(encoding="utf-8"))
-            _print(cps.compile_episode(snap), as_json=as_json)
-            return 0
+            if getattr(args, "store", False):
+                out = cps.compile_and_store(snap)
+            else:
+                out = cps.compile_episode(snap)
+            _print(out, as_json=as_json)
+            return 0 if out.get("ok", True) else 1
 
     if args.cmd == "autoresearch":
         from .autoresearch import daemon as ar_daemon
