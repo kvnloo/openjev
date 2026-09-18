@@ -353,7 +353,7 @@ async function closeOpenTurn(opts: {
 export default function z0intBridge(pi: ExtensionAPI) {
 	pi.setLabel("z0int preflight → Kerdoios residual → close (log-only)");
 
-	pi.on("before_agent_start", (event, ctx) => {
+	pi.on("before_agent_start", async (event, ctx) => {
 		const prompt =
 			event && typeof event === "object" && "prompt" in event
 				? String((event as { prompt?: unknown }).prompt ?? "").trim()
@@ -362,7 +362,7 @@ export default function z0intBridge(pi: ExtensionAPI) {
 			ctx && typeof ctx === "object" && "sessionId" in ctx
 				? String((ctx as { sessionId?: unknown }).sessionId ?? "")
 				: process.env.OMP_SESSION_ID;
-		// Sync heartbeat: proves the handler ran even if async work fails.
+		// Sync heartbeat first: proves the handler ran even if later work fails.
 		try {
 			append(HEART, {
 				schema: "z0int.bridge_heart.v1",
@@ -376,9 +376,12 @@ export default function z0intBridge(pi: ExtensionAPI) {
 			/* */
 		}
 		if (!prompt || prompt.startsWith("/")) return;
-		// Fire-and-forget: do not block the agent turn on preflight/kerdoios.
-		void turnBridge(prompt, sessionId || undefined).catch(() => undefined);
-		return;
+		// Await open so agent_end can close the same turn (print-mode races otherwise).
+		try {
+			await turnBridge(prompt, sessionId || undefined);
+		} catch {
+			return;
+		}
 	});
 
 	pi.on("agent_end", async (event) => {
@@ -391,6 +394,11 @@ export default function z0intBridge(pi: ExtensionAPI) {
 					? ((event as { messages?: unknown[] }).messages || [])
 					: [];
 			const est = estimateMeasuredFromMessages(messages);
+			// Brief poll: before_agent_start may still be writing last_open on short turns.
+			for (let i = 0; i < 20; i++) {
+				if (existsSync(LAST)) break;
+				await new Promise((r) => setTimeout(r, 50));
+			}
 			await closeOpenTurn({
 				measured: est.measured,
 				inputTokens: est.input_tokens,
