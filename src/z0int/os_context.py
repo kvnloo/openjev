@@ -273,10 +273,32 @@ def import_from_db(
                 (int(limit),),
             ).fetchall()
         ]
-        routines = [
-            dict(r)
-            for r in con.execute("SELECT * FROM routine_candidates ORDER BY support DESC LIMIT 200").fetchall()
-        ]
+        # P3 routine + P3d utility tables may be absent on older DBs
+        try:
+            routines = [
+                dict(r)
+                for r in con.execute(
+                    "SELECT * FROM routine_candidates ORDER BY support DESC LIMIT 200"
+                ).fetchall()
+            ]
+        except sqlite3.OperationalError:
+            routines = []
+        try:
+            utility_rows = [
+                dict(r)
+                for r in con.execute(
+                    "SELECT * FROM automation_utility ORDER BY updated_at DESC LIMIT 200"
+                ).fetchall()
+            ]
+            receipt_rows = [
+                dict(r)
+                for r in con.execute(
+                    "SELECT * FROM automation_receipts ORDER BY id DESC LIMIT 5000"
+                ).fetchall()
+            ]
+        except sqlite3.OperationalError:
+            utility_rows = []
+            receipt_rows = []
     finally:
         con.close()
 
@@ -341,6 +363,40 @@ def import_from_db(
                 + "\n"
             )
 
+    util_path = out_dir / "automation_utility.jsonl"
+    rcpt_path = out_dir / "automation_receipts.jsonl"
+    with util_path.open("w", encoding="utf-8") as fh:
+        for r in utility_rows:
+            fh.write(
+                json.dumps(
+                    {"schema": "os.automation_utility.v0", **{k: r.get(k) for k in r}},
+                    sort_keys=True,
+                    default=str,
+                )
+                + "\n"
+            )
+    with rcpt_path.open("w", encoding="utf-8") as fh:
+        for r in receipt_rows:
+            details = r.get("details_json")
+            if isinstance(details, str):
+                details = _json_load(details)
+            fh.write(
+                json.dumps(
+                    {
+                        "schema": "os.automation_receipt.v0",
+                        "id": r.get("id"),
+                        "ts": r.get("ts"),
+                        "fingerprint": r.get("fingerprint"),
+                        "phase": r.get("phase"),
+                        "suggestion_id": r.get("suggestion_id"),
+                        "ok": r.get("ok"),
+                        "details": details,
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+
     # operator label histogram
     hist: dict[str, int] = {}
     for ep in compiled:
@@ -355,12 +411,16 @@ def import_from_db(
         "shadow": len(shadows),
         "horizons": len(hz_rows),
         "routines": len(routines),
+        "automation_utility": len(utility_rows),
+        "automation_receipts": len(receipt_rows),
         "operator_histogram": hist,
         "paths": {
             "episodes": str(ep_path),
             "shadow": str(sh_path),
             "horizons": str(hz_path),
             "routines": str(rt_path),
+            "automation_utility": str(util_path),
+            "automation_receipts": str(rcpt_path),
         },
         "operator_schema": SCHEMA_OPERATOR,
         "operator_vocab": list(OPERATOR_FAMILIES),
