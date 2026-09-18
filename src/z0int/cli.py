@@ -495,6 +495,19 @@ def build_parser() -> argparse.ArgumentParser:
     artl = art_sub.add_parser("list", help="List installed specialists")
     _json_flag(artl)
 
+    ct = sub.add_parser(
+        "contrastive",
+        help="Contrastive evidence-sufficiency eval (Nimble-style unit; no Nimble weights)",
+    )
+    ct_sub = ct.add_subparsers(dest="contrastive_cmd", required=True)
+    ct_ev = ct_sub.add_parser("eval", help="Run four-condition probe on a family or built-in fixture")
+    ct_ev.add_argument("--family-json", default=None, help="ContrastFamily JSON path")
+    ct_ev.add_argument("--recipe-json", default=None, help="optional evidence-filter recipe JSON")
+    ct_ev.add_argument("--store", action="store_true", help="write evidence_dependency record")
+    _json_flag(ct_ev)
+    ct_fx = ct_sub.add_parser("fixture", help="Print built-in project_status contrast family")
+    _json_flag(ct_fx)
+
     ar = sub.add_parser("autoresearch", help="Verified Trajectory Superoptimizer")
     ar_sub = ar.add_subparsers(dest="autoresearch_cmd", required=True)
     for _ar_name, _ar_help in (
@@ -514,6 +527,7 @@ def build_parser() -> argparse.ArgumentParser:
             _sp.add_argument("--poll-seconds", type=float, default=5.0)
         if _ar_name == "enqueue":
             _sp.add_argument("--trace-id", required=True)
+            _sp.add_argument("--kind", default="context_policy", choices=["context_policy", "contrastive_evidence"])
             _sp.add_argument("--verifier-id", required=True)
             _sp.add_argument("--verified-success", type=str, default="true")
 
@@ -816,6 +830,29 @@ def main(argv: list[str] | None = None) -> int:
             _print(out, as_json=as_json)
             return 0
 
+    if args.cmd == "contrastive":
+        from . import contrastive_evidence as ce
+        import json as _json
+        if args.contrastive_cmd == "fixture":
+            fam = ce.example_project_status_family()
+            _print(fam.to_dict(), as_json=True)
+            return 0
+        if args.contrastive_cmd == "eval":
+            if getattr(args, "family_json", None):
+                fam = ce.ContrastFamily.from_dict(_json.loads(Path(args.family_json).read_text(encoding="utf-8")))
+            else:
+                fam = ce.example_project_status_family()
+            if getattr(args, "recipe_json", None):
+                recipe = _json.loads(Path(args.recipe_json).read_text(encoding="utf-8"))
+                out = ce.evaluate_recipe_on_family(fam, recipe)
+            else:
+                out = ce.evaluate_family(fam)
+            if getattr(args, "store", False):
+                path = ce.store_dependency(out["dependency"])
+                out["dependency_path"] = str(path)
+            _print(out, as_json=as_json)
+            return 0 if out.get("full_pass") else 1
+
     if args.cmd == "autoresearch":
         from .autoresearch import daemon as ar_daemon
         from .autoresearch.queue import enqueue_trace
@@ -841,10 +878,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if cmd == "enqueue":
             vs = str(getattr(args, "verified_success", "true")).lower() in ("1", "true", "yes", "y")
-            out = enqueue_trace(args.trace_id, verified_success=vs if vs else None, verifier_id=args.verifier_id)
-            # if user passed false, force not verified
-            if not vs:
-                out = enqueue_trace(args.trace_id, verified_success=False, verifier_id=args.verifier_id)
+            kind = getattr(args, "kind", None) or "context_policy"
+            pl = {"kind": kind}
+            out = enqueue_trace(
+                args.trace_id,
+                verified_success=True if vs else False,
+                verifier_id=args.verifier_id,
+                payload=pl,
+            )
             _print(out, as_json=as_json)
             return 0 if out.get("ok") else 1
 
