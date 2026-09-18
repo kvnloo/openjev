@@ -2,7 +2,7 @@
 
 ## Onboarding (do this first)
 
-1. Read **`docs/ONBOARDING.md`** (canonical).
+1. Read **`docs/ONBOARDING.md`** (canonical product setup).
 2. Prefer **`z0int` CLI** over manually reproducing setup:
    - `z0int doctor --json`
    - `z0int onboard --auto`
@@ -11,7 +11,15 @@
 3. Do not bypass privacy/secret checks. Do not invent unimplemented steps.
 4. Thin skill: `skills/z0int-onboard/SKILL.md` (calls CLI only).
 
-## Runtime / bench
+## Verified OSS Loop
+
+This repo follows the [Verified OSS Loop](https://github.com/kvnloo/verified-oss-loop). See **`docs/verified-oss-loop.md`**.
+
+- Kit: `.verified-oss-loop/` (inventory, rollout, kit skills)
+- Issues are not claims. Workers never merge `master` or `dev`.
+- Day-pass PRs → `preview`; overnight unattended → `nightly` (see `python3 .verified-oss-loop/rollout.py show`).
+- Evidence: revision-bound unit + product smoke; mutation is `n/a` unless adopted.
+
 
 - Run commands from the repository root in an isolated environment installed with `pip install -e '.[test]'` (or `./scripts/bootstrap.sh`).
 - FlyForge stack bootstrap (legacy, still valid): `bash scripts/setup-flyforge.sh`. Prefer `z0int onboard` for new setups. See `docs/evolution-lab.md`.
