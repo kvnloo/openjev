@@ -288,11 +288,23 @@ def join_outcome(
 
 
 def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict[str, Any]:
-    """Aggregate estimated savings from receipts + bridge stream."""
+    """Aggregate estimated + measured frontier-token economics.
+
+    ``frontier_tokens_avoided_est`` — counterfactual from preflight/baselines.
+    ``baseline_tokens_sum`` — sum of baseline_in+baseline_out when present.
+    ``measured_frontier_tokens_sum`` — actual post-turn frontier tokens when joined.
+    ``actual_tokens_saved`` — max(0, baseline − measured) over rows with both.
+    ``tokens_per_verified_task`` — tokens attributed to verified gold outcomes.
+    """
     rows = 0
     avoided = 0
     measured = 0
+    baseline = 0
+    actual_saved = 0
+    rows_with_both = 0
     with_outcome = 0
+    verified = 0
+    verified_tokens = 0
     by_cap: dict[str, int] = {}
     paths_home = paths.home() if root is None else root
     candidates = [
@@ -306,27 +318,66 @@ def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict
                 continue
             rows += 1
             av = rec.get("estimated_frontier_tokens_avoided")
-            if av is None and row.get("receipt"):
-                av = (row.get("receipt") or {}).get("estimated_frontier_tokens_avoided")
             if av is not None:
                 try:
                     avoided += int(av)
                 except (TypeError, ValueError):
                     pass
-            if rec.get("measured_frontier_tokens") is not None:
+            b_in = rec.get("baseline_input_tokens")
+            b_out = rec.get("baseline_output_tokens")
+            base_tot = None
+            try:
+                if b_in is not None or b_out is not None:
+                    base_tot = int(b_in or 0) + int(b_out or 0)
+                    baseline += base_tot
+            except (TypeError, ValueError):
+                base_tot = None
+            meas = rec.get("measured_frontier_tokens")
+            meas_i = None
+            if meas is not None:
                 try:
-                    measured += int(rec["measured_frontier_tokens"])
+                    meas_i = int(meas)
+                    measured += meas_i
                 except (TypeError, ValueError):
-                    pass
-            if rec.get("outcome") or row.get("outcome"):
+                    meas_i = None
+            if base_tot is not None and meas_i is not None:
+                rows_with_both += 1
+                actual_saved += max(0, base_tot - meas_i)
+            outcome = rec.get("outcome") or row.get("outcome")
+            if outcome:
                 with_outcome += 1
+                is_v = False
+                if isinstance(outcome, dict):
+                    is_v = bool(
+                        outcome.get("verified") is True
+                        or outcome.get("success") is True
+                        or outcome.get("test_pass") is True
+                        or outcome.get("tool_ok") is True
+                        or outcome.get("pr_merged") is True
+                    )
+                if is_v:
+                    verified += 1
+                    tok = meas_i if meas_i is not None else (base_tot if base_tot is not None else None)
+                    if tok is None and av is not None:
+                        try:
+                            tok = int(av)
+                        except (TypeError, ValueError):
+                            tok = None
+                    if tok is not None:
+                        verified_tokens += int(tok)
             cap = rec.get("capability_id") or row.get("capability_id") or "unknown"
             by_cap[str(cap)] = by_cap.get(str(cap), 0) + 1
+    t_per_v = (verified_tokens / verified) if verified else None
     return {
         "schema": "z0int.tokenomics_summary.v1",
         "rows": rows,
         "frontier_tokens_avoided_est": avoided,
+        "baseline_tokens_sum": baseline,
         "measured_frontier_tokens_sum": measured,
+        "actual_tokens_saved": actual_saved,
+        "rows_with_baseline_and_measured": rows_with_both,
         "rows_with_outcome": with_outcome,
+        "verified_tasks": verified,
+        "tokens_per_verified_task": t_per_v,
         "by_capability": by_cap,
     }

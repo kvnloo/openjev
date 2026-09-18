@@ -5,7 +5,6 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 
 class ReceiptBuild(unittest.TestCase):
@@ -52,9 +51,12 @@ class ReceiptJoin(unittest.TestCase):
                 capability_id="recovery_action",
                 route="local",
                 estimated_frontier_tokens_avoided=1200,
+                baseline_input_tokens=2000,
+                baseline_output_tokens=400,
             )
             row = append_receipt(r, root=home)
             tid = row["trace_id"]
+            # join with measured tokens via updated receipt path: append measured on join update
             joined = join_outcome(
                 tid,
                 Outcome(test_pass=True, success=True, source="test"),
@@ -68,6 +70,10 @@ class ReceiptJoin(unittest.TestCase):
             self.assertGreaterEqual(summary["rows"], 1)
             self.assertGreaterEqual(summary["frontier_tokens_avoided_est"], 1200)
             self.assertGreaterEqual(summary["rows_with_outcome"], 1)
+            self.assertIn("actual_tokens_saved", summary)
+            self.assertIn("tokens_per_verified_task", summary)
+            self.assertIn("baseline_tokens_sum", summary)
+            self.assertGreaterEqual(summary["verified_tasks"], 1)
             self.assertTrue((home / "receipts" / "decisions.jsonl").is_file())
             self.assertTrue((home / "receipts" / "outcomes.jsonl").is_file())
 
@@ -78,9 +84,9 @@ class ReceiptCli(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
-            env = {**os.environ, "Z0INT_HOME": str(home)}
-            with mock.patch.dict(os.environ, env, clear=False):
-                # paths.home reads env at call time
+            old = os.environ.get("Z0INT_HOME")
+            os.environ["Z0INT_HOME"] = str(home)
+            try:
                 rc = main(
                     [
                         "receipt",
@@ -105,6 +111,11 @@ class ReceiptCli(unittest.TestCase):
                 self.assertEqual(rc, 0)
                 rc = main(["receipt", "summary", "--json"])
                 self.assertEqual(rc, 0)
+            finally:
+                if old is None:
+                    os.environ.pop("Z0INT_HOME", None)
+                else:
+                    os.environ["Z0INT_HOME"] = old
 
 
 if __name__ == "__main__":
