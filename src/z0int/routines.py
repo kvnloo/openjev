@@ -34,6 +34,8 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Literal, Sequence
 
+from .credit import lift_credit
+
 Split = Literal["train", "dev", "sealed", "future"]
 Status = Literal["candidate", "credited", "promoted", "demoted"]
 EvidenceLevel = Literal["L0_imitation", "L1_teacher", "L2_outcome", "L3_closed_loop"]
@@ -125,6 +127,8 @@ class RoutineMetrics:
     wilson_lower_95: float | None
     global_prior_precision: float | None
     lift_vs_global_prior: float | None
+    lift_z_score: float | None = None
+    lift_passes_2sigma: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -223,6 +227,7 @@ class CompileConfig:
     max_numeric_thresholds: int = 5
     max_candidates: int = 128
     require_wilson_lower: bool = False
+    min_credit_z: float = 1.959963984540054
 
     def __post_init__(self) -> None:
         if not 0.0 < self.precision_floor <= 1.0:
@@ -366,6 +371,7 @@ def evaluate_rule(
     global_rows = [r for r in scoped if r.get("target") == output]
     global_prior = len(global_rows) / len(scoped) if scoped else None
     lift = (precision - global_prior) if precision is not None and global_prior is not None else None
+    credit = lift_credit(successes=correct, n=len(matches), baseline=global_prior)
     return RoutineMetrics(
         split=split,
         n_rows=len(scoped),
@@ -378,6 +384,8 @@ def evaluate_rule(
         wilson_lower_95=wilson_lower(correct, len(matches)),
         global_prior_precision=global_prior,
         lift_vs_global_prior=lift,
+        lift_z_score=credit.z_score,
+        lift_passes_2sigma=credit.passed_2sigma,
     )
 
 
@@ -406,6 +414,8 @@ def _passes(metrics: RoutineMetrics | None, *, cfg: CompileConfig, min_matches: 
     if metrics.precision < cfg.precision_floor:
         return False
     if metrics.lift_vs_global_prior is None or metrics.lift_vs_global_prior < cfg.min_lift_vs_global_prior:
+        return False
+    if cfg.min_credit_z > 0 and (metrics.lift_z_score is None or metrics.lift_z_score < cfg.min_credit_z):
         return False
     if cfg.require_wilson_lower and (
         metrics.wilson_lower_95 is None or metrics.wilson_lower_95 < cfg.precision_floor

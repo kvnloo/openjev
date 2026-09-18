@@ -23,6 +23,8 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence
 
+from .credit import paired_credit
+
 Split = Literal["train", "dev", "sealed", "future"]
 PolicyStatus = Literal["candidate", "credited", "promoted", "demoted"]
 
@@ -60,6 +62,7 @@ class CascadeMetrics:
     baseline_success_rate: float | None = None
     baseline_premium_tokens: int | None = None
     premium_token_reduction: float | None = None
+    paired_credit: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -144,6 +147,9 @@ class CascadeCompileConfig:
     min_sessions: int = 3
     threshold_grid: tuple[float, ...] = (0.0, 0.5, 0.7, 0.8, 0.9, 0.95, 0.99)
     require_premium_token_reduction: bool = True
+    require_activation: bool = True
+    min_offload_rows: int = 1
+    require_2sigma_noninferiority: bool = True
 
 
 @dataclass(frozen=True)
@@ -220,11 +226,19 @@ def evaluate_policy(rows: Sequence[dict[str, Any]], policy: CascadePolicy, *, sp
     latency = 0.0
     counts: dict[str, int] = {s.name: 0 for s in policy.stages}
     fallback = 0
+    cand_correct_rows: list[bool] = []
+    base_correct_rows: list[bool] = []
     for row in scoped:
         if "target" not in row:
             raise ValueError("cascade rows require target")
         d = decide_row(row, policy)
-        correct += int(d.output == row.get("target"))
+        cand_ok = d.output == row.get("target")
+        correct += int(cand_ok)
+        cand_correct_rows.append(bool(cand_ok))
+        base_obs = _stage_obs(row, policy.final_stage)
+        if base_obs is None:
+            raise ValueError(f"baseline/final stage {policy.final_stage!r} missing")
+        base_correct_rows.append(base_obs.get("output") == row.get("target"))
         premium += d.premium_tokens
         total += d.total_tokens
         latency += d.latency_ms
@@ -236,6 +250,11 @@ def evaluate_policy(rows: Sequence[dict[str, Any]], policy: CascadePolicy, *, sp
     reduction = None
     if baseline_premium > 0:
         reduction = 1.0 - premium / baseline_premium
+    paired = paired_credit(
+        cand_correct_rows,
+        base_correct_rows,
+        noninferiority_margin=policy.max_success_regression,
+    ) if scoped else None
     return CascadeMetrics(
         split=split,
         n=n,
@@ -252,6 +271,7 @@ def evaluate_policy(rows: Sequence[dict[str, Any]], policy: CascadePolicy, *, sp
         baseline_success_rate=baseline_success,
         baseline_premium_tokens=baseline_premium,
         premium_token_reduction=reduction,
+        paired_credit=paired.to_dict() if paired else None,
     )
 
 
@@ -314,6 +334,9 @@ def compile_cascade(
         metrics = evaluate_policy(dev, policy, split="dev")
         if metrics.success_rate + 1e-12 < min_success:
             continue
+        offloaded = metrics.n - metrics.stage_counts.get(final_stage, 0)
+        if cfg.require_activation and offloaded < cfg.min_offload_rows:
+            continue
         if cfg.require_premium_token_reduction and metrics.premium_tokens >= baseline_premium:
             continue
         # Main objective: premium tokens / verified success. Secondary: more
@@ -348,7 +371,17 @@ def credit_sealed(
         not cfg.require_premium_token_reduction
         or (metrics.baseline_premium_tokens or 0) > metrics.premium_tokens
     )
-    status: PolicyStatus = "credited" if enough and metrics.success_rate + 1e-12 >= floor and token_win else "candidate"
+    offloaded = metrics.n - metrics.stage_counts.get(policy.final_stage, 0)
+    activation = (not cfg.require_activation) or offloaded >= cfg.min_offload_rows
+    paired_ok = True
+    if cfg.require_2sigma_noninferiority:
+        pc = metrics.paired_credit or {}
+        paired_ok = bool(pc.get("passed_2sigma_noninferiority"))
+    status: PolicyStatus = (
+        "credited"
+        if enough and activation and metrics.success_rate + 1e-12 >= floor and token_win and paired_ok
+        else "candidate"
+    )
     return replace(policy, sealed=metrics, status=status)
 
 
@@ -372,7 +405,9 @@ def observe_future(
     baseline = metrics.baseline_success_rate or 0.0
     floor = max(policy.min_success_rate, baseline - policy.max_success_regression)
     enough = len(future_rows) >= min_rows and len(sessions) >= min_sessions
-    drifted = enough and metrics.success_rate + 1e-12 < floor
+    pc = metrics.paired_credit or {}
+    paired_failed = not bool(pc.get("passed_2sigma_noninferiority", True))
+    drifted = enough and (metrics.success_rate + 1e-12 < floor or paired_failed)
     return replace(policy, future=metrics, status="demoted" if drifted else policy.status)
 
 
