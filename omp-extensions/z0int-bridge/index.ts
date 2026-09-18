@@ -18,6 +18,7 @@ const SHADOW = join(Z0, "shadow", "preflight.jsonl");
 const OPEN = join(Z0, "stream", "open_turns.jsonl");
 const LAST = join(Z0, "stream", "last_open.json");
 const HEART = join(Z0, "stream", "bridge_heart.jsonl");
+const closingTraces = new Set<string>();
 
 const PY =
 	process.env.EVOLUTION_LAB_PYTHON ||
@@ -167,18 +168,30 @@ async function turnBridge(prompt: string, sessionId: string | undefined): Promis
 	}
 	const latencyMs = Date.now() - t0;
 	const traceId = randomUUID().replaceAll("-", "");
+	const cf =
+		pf.counterfactual && typeof pf.counterfactual === "object"
+			? (pf.counterfactual as Jsonish)
+			: null;
+	const wr =
+		pf.work_requirement && typeof pf.work_requirement === "object"
+			? (pf.work_requirement as Jsonish)
+			: null;
 	const baselineIn =
 		typeof pf.baseline_input_tokens === "number"
 			? pf.baseline_input_tokens
-			: typeof (pf.work_requirement as Jsonish | null)?.estimated_input_tokens === "number"
-				? ((pf.work_requirement as Jsonish).estimated_input_tokens as number)
-				: null;
+			: typeof wr?.estimated_input_tokens === "number"
+				? (wr.estimated_input_tokens as number)
+				: typeof cf?.estimated_input_tokens === "number"
+					? (cf.estimated_input_tokens as number)
+					: null;
 	const baselineOut =
 		typeof pf.baseline_output_tokens === "number"
 			? pf.baseline_output_tokens
-			: typeof (pf.work_requirement as Jsonish | null)?.estimated_output_tokens === "number"
-				? ((pf.work_requirement as Jsonish).estimated_output_tokens as number)
-				: null;
+			: typeof wr?.estimated_output_tokens === "number"
+				? (wr.estimated_output_tokens as number)
+				: typeof cf?.estimated_output_tokens === "number"
+					? (cf.estimated_output_tokens as number)
+					: null;
 	const avoided =
 		typeof pf.estimated_frontier_tokens_avoided === "number"
 			? pf.estimated_frontier_tokens_avoided
@@ -319,6 +332,43 @@ async function closeOpenTurn(opts: {
 
 	const r = await runCmd(Z0_PY, args, Z0_ROOT, 5000);
 	const closed = parseJson(r);
+	const ok = !closed.error && closed.ok !== false;
+	try {
+		append(HEART, {
+			schema: "z0int.bridge_close_heart.v1",
+			ts: Date.now() / 1000,
+			trace_id: traceId,
+			ok,
+			source: opts.source || "bridge_agent_end",
+			measured: opts.measured ?? null,
+			error: closed.error ?? (r.code !== 0 ? r.stderr.slice(0, 200) : null),
+		});
+	} catch {
+		/* */
+	}
+	if (ok) {
+		try {
+			// Clear open marker so the next turn owns last_open.
+			if (existsSync(LAST)) {
+				const cur = readLast();
+				if (cur && cur.trace_id === traceId) {
+					writeFileSync(LAST, ""); // emptied; next open overwrites
+					// prefer unlink via write empty then next writeLast
+				}
+			}
+			// overwrite with closed marker so readers don't re-close
+			writeLast({
+				schema: "z0int.open_turn.v1",
+				trace_id: traceId,
+				closed: true,
+				closed_ts: Date.now() / 1000,
+				measured: opts.measured ?? null,
+				source: opts.source || "bridge_agent_end",
+			});
+		} catch {
+			/* */
+		}
+	}
 
 	// Kerdoios observed economics (best-effort)
 	try {
@@ -348,6 +398,34 @@ async function closeOpenTurn(opts: {
 		/* */
 	}
 	return closed;
+}
+
+
+async function closeFromMessages(messages: unknown[], source: string): Promise<Jsonish> {
+	const est = estimateMeasuredFromMessages(messages);
+	for (let i = 0; i < 20; i++) {
+		const last = readLast();
+		if (last && last.closed !== true && typeof last.trace_id === "string") break;
+		await new Promise((r) => setTimeout(r, 50));
+	}
+	const last = readLast();
+	if (!last || typeof last.trace_id !== "string") return { ok: false, error: "no_open_trace" };
+	if (last.closed === true) return { ok: true, already_closed: true, trace_id: last.trace_id };
+	const tid = last.trace_id as string;
+	if (closingTraces.has(tid)) return { ok: true, already_closed: true, trace_id: tid };
+	closingTraces.add(tid);
+	try {
+		return await closeOpenTurn({
+			measured: est.measured,
+			inputTokens: est.input_tokens,
+			outputTokens: est.output_tokens,
+			success: true,
+			toolOk: true,
+			source,
+		});
+	} finally {
+		// keep in set so agent_end after turn_end is a no-op
+	}
 }
 
 export default function z0intBridge(pi: ExtensionAPI) {
@@ -384,6 +462,20 @@ export default function z0intBridge(pi: ExtensionAPI) {
 		}
 	});
 
+	// turn_end is awaited by the harness — preferred close path (print-mode safe).
+	pi.on("turn_end", async (event) => {
+		try {
+			const msg =
+				event && typeof event === "object" && "message" in event
+					? (event as { message?: unknown }).message
+					: null;
+			const messages = msg ? [msg] : [];
+			await closeFromMessages(messages, "bridge_turn_end");
+		} catch {
+			return;
+		}
+	});
+
 	pi.on("agent_end", async (event) => {
 		try {
 			if (event && typeof event === "object" && "willContinue" in event && (event as { willContinue?: boolean }).willContinue) {
@@ -393,20 +485,7 @@ export default function z0intBridge(pi: ExtensionAPI) {
 				event && typeof event === "object" && "messages" in event
 					? ((event as { messages?: unknown[] }).messages || [])
 					: [];
-			const est = estimateMeasuredFromMessages(messages);
-			// Brief poll: before_agent_start may still be writing last_open on short turns.
-			for (let i = 0; i < 20; i++) {
-				if (existsSync(LAST)) break;
-				await new Promise((r) => setTimeout(r, 50));
-			}
-			await closeOpenTurn({
-				measured: est.measured,
-				inputTokens: est.input_tokens,
-				outputTokens: est.output_tokens,
-				success: true,
-				toolOk: true,
-				source: "bridge_agent_end",
-			});
+			await closeFromMessages(messages, "bridge_agent_end");
 		} catch {
 			return;
 		}
