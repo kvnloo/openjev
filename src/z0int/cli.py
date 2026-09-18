@@ -439,6 +439,10 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(osc_imp)
     osc_st = osc_sub.add_parser("stats", help="Live/imported os.next_context metrics")
     _json_flag(osc_st)
+    osc_sk = osc_sub.add_parser("skeptic", help="Offline skeptic baselines on imported Flow episodes")
+    osc_sk.add_argument("--horizon-ms", type=int, default=2000)
+    osc_sk.add_argument("--train-frac", type=float, default=0.7)
+    _json_flag(osc_sk)
 
     tk = sub.add_parser("task", help="Authorized verified-loop task family (worktree + checkpoint)")
     tk_sub = tk.add_subparsers(dest="task_cmd", required=True)
@@ -869,6 +873,15 @@ def main(argv: list[str] | None = None) -> int:
             out = os_context.stats()
             _print(out, as_json=as_json)
             return 0 if out.get("ok", True) else 1
+        if args.os_context_cmd == "skeptic":
+            from . import flow_skeptic
+
+            out = flow_skeptic.run_skeptic(
+                horizon_ms=int(getattr(args, "horizon_ms", 2000) or 2000),
+                train_frac=float(getattr(args, "train_frac", 0.7) or 0.7),
+            )
+            _print(out, as_json=as_json)
+            return 0 if out.get("ok") else 1
 
     if args.cmd == "preflight":
         from .preflight import preflight_dict
