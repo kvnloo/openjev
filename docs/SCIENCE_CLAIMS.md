@@ -46,6 +46,28 @@ API: `evolution_lab.coverage_metric.binary_gate_metrics(y_true, y_pred)`.
 
 ## L2 bar (next)
 
+
+## First L2 specialist (locked pick)
+
+**`recovery_action`** — not `needs_verification`, not `delegate_gating`.
+
+| Why recovery_action | Why not the others |
+| --- | --- |
+| `label_quality=high`; gym + locked P0 splits (`data/p0`, seed 20260912) | `needs_verification`: sealed L0 n≈14, needs test-join |
+| Closed-loop reward is a real subsequent-success signal (L2) | `delegate_gating`: L0 fingerprint only until wall-clock join |
+| Student bundle already hits confirm/val/ood/CL gates | |
+
+Run:
+
+```bash
+python -m evolution_lab l2-recovery
+# → ~/.z0int/benchmarks/recovery_action_l2.json
+# → ~/.z0int/specialists/recovery_action.canary.json  (only if gates pass)
+```
+
+Gates (must all hold): confirm≥0.95, val≥0.95, ood≥0.85, closed_loop≥1.0.
+OMP hooks stay **log_only** until that canary marker exists; other capabilities remain shadow.
+
 L0/L1 labels are **not** world success. L2 requires sealed outcomes joined on
 `trace_id` (`z0int receipt join` / `outcome_gold`) for a chosen specialist
 (`recovery_action` or `needs_verification` preferred over `delegate_gating`).
