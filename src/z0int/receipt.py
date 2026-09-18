@@ -1,0 +1,332 @@
+"""Decision receipt: one object for cognition → action → world → economics.
+
+Schema ``z0int.decision_receipt.v1`` is the contract. Harnesses and Evolution Lab
+emit compatible rows; Kerdoios consumes ``capability_id`` + token fields only.
+Personal artifacts land under ``~/.z0int/receipts/`` (never the git tree).
+"""
+
+from __future__ import annotations
+
+import json
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+from . import paths
+
+SCHEMA = "z0int.decision_receipt.v1"
+RECEIPTS_NAME = "decisions.jsonl"
+OUTCOMES_NAME = "outcomes.jsonl"
+
+
+def receipts_path(root: Path | None = None) -> Path:
+    layout = paths.ensure_layout(root)
+    return layout["receipts"] / RECEIPTS_NAME
+
+
+def outcomes_path(root: Path | None = None) -> Path:
+    layout = paths.ensure_layout(root)
+    return layout["receipts"] / OUTCOMES_NAME
+
+
+def new_trace_id() -> str:
+    return uuid.uuid4().hex
+
+
+@dataclass
+class Outcome:
+    """World consequences joined later via ``trace_id``."""
+
+    verified: bool | None = None
+    success: bool | None = None
+    tool_ok: bool | None = None
+    test_pass: bool | None = None
+    task_done: bool | None = None
+    user_correction: bool | None = None
+    reverted: bool | None = None
+    verifier_ok: bool | None = None
+    ci_failed: bool | None = None
+    pr_merged: bool | None = None
+    retries: int | None = None
+    note: str | None = None
+    source: str | None = None  # hermes|omp|ci|manual|...
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: v for k, v in asdict(self).items() if v is not None}
+
+    def tier(self) -> str:
+        d = self.to_dict()
+        strong = any(
+            d.get(k) is True
+            for k in ("test_pass", "tool_ok", "task_done", "verifier_ok", "pr_merged", "success")
+        )
+        if d.get("verified") is True and d.get("success") is True:
+            strong = True
+        negative = any(
+            d.get(k) is True for k in ("user_correction", "reverted", "ci_failed")
+        ) or any(d.get(k) is False for k in ("test_pass", "tool_ok", "success", "verified"))
+        if strong and not negative:
+            return "gold"
+        if negative:
+            return "negative"
+        return "soft"
+
+
+@dataclass
+class DecisionReceipt:
+    """One specialist/model decision and its (optional) measured economics."""
+
+    trace_id: str
+    session_id: str | None = None
+    capability_id: str | None = None
+    provider: str | None = None  # local_mb | openjev | kerdoios_plan | frontier | ...
+    model: str | None = None
+    prediction: str | None = None
+    confidence: float | None = None
+    action_taken: str | None = None  # route/label/action actually applied
+    route: str | None = None  # local | model | escalate | shadow
+    execution: str = "log_only"  # log_only | shadow | canary | live
+    outcome: dict[str, Any] | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    baseline_input_tokens: int | None = None
+    baseline_output_tokens: int | None = None
+    estimated_frontier_tokens_avoided: int | None = None
+    measured_frontier_tokens: int | None = None  # actual post-turn when known
+    latency_ms: float | None = None
+    fallbacks: int = 0
+    ts: float = field(default_factory=time.time)
+    schema: str = SCHEMA
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        extra = d.pop("extra") or {}
+        # drop Nones for compact jsonl
+        out = {k: v for k, v in d.items() if v is not None}
+        if extra:
+            out["extra"] = extra
+        out["schema"] = SCHEMA
+        return out
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> DecisionReceipt:
+        known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        base = {k: v for k, v in raw.items() if k in known and k != "extra"}
+        extra = {k: v for k, v in raw.items() if k not in known and k != "schema"}
+        if "extra" in raw and isinstance(raw["extra"], dict):
+            extra.update(raw["extra"])
+        base.setdefault("trace_id", new_trace_id())
+        base["extra"] = extra
+        return cls(**base)  # type: ignore[arg-type]
+
+    def tokens_saved_est(self) -> int | None:
+        if self.estimated_frontier_tokens_avoided is not None:
+            return int(self.estimated_frontier_tokens_avoided)
+        if self.baseline_input_tokens is None and self.baseline_output_tokens is None:
+            return None
+        base = int(self.baseline_input_tokens or 0) + int(self.baseline_output_tokens or 0)
+        used = int(self.input_tokens or 0) + int(self.output_tokens or 0)
+        if self.measured_frontier_tokens is not None:
+            used = int(self.measured_frontier_tokens)
+        return max(0, base - used)
+
+
+def build_receipt(
+    *,
+    trace_id: str | None = None,
+    session_id: str | None = None,
+    capability_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    prediction: str | None = None,
+    confidence: float | None = None,
+    action_taken: str | None = None,
+    route: str | None = None,
+    execution: str = "log_only",
+    latency_ms: float | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    baseline_input_tokens: int | None = None,
+    baseline_output_tokens: int | None = None,
+    estimated_frontier_tokens_avoided: int | None = None,
+    fallbacks: int = 0,
+    extra: dict[str, Any] | None = None,
+) -> DecisionReceipt:
+    return DecisionReceipt(
+        trace_id=trace_id or new_trace_id(),
+        session_id=session_id,
+        capability_id=capability_id,
+        provider=provider,
+        model=model,
+        prediction=prediction,
+        confidence=confidence,
+        action_taken=action_taken,
+        route=route,
+        execution=execution,
+        latency_ms=latency_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        baseline_input_tokens=baseline_input_tokens,
+        baseline_output_tokens=baseline_output_tokens,
+        estimated_frontier_tokens_avoided=estimated_frontier_tokens_avoided,
+        fallbacks=fallbacks,
+        extra=dict(extra or {}),
+    )
+
+
+def validate_receipt(raw: dict[str, Any]) -> list[str]:
+    """Return list of problems; empty = ok enough to store."""
+    errs: list[str] = []
+    if not isinstance(raw, dict):
+        return ["not_an_object"]
+    if not raw.get("trace_id"):
+        errs.append("missing_trace_id")
+    schema = raw.get("schema")
+    if schema and schema != SCHEMA and not str(schema).startswith("z0int.decision_receipt"):
+        errs.append(f"unexpected_schema:{schema}")
+    conf = raw.get("confidence")
+    if conf is not None:
+        try:
+            c = float(conf)
+            if c < 0 or c > 1.5:  # allow slight overshoot from logits
+                errs.append("confidence_out_of_range")
+        except (TypeError, ValueError):
+            errs.append("confidence_not_numeric")
+    return errs
+
+
+def append_receipt(receipt: DecisionReceipt | dict[str, Any], *, root: Path | None = None) -> dict[str, Any]:
+    row = receipt.to_dict() if isinstance(receipt, DecisionReceipt) else dict(receipt)
+    row.setdefault("schema", SCHEMA)
+    row.setdefault("ts", time.time())
+    row.setdefault("trace_id", new_trace_id())
+    errs = validate_receipt(row)
+    if errs and "missing_trace_id" in errs:
+        raise ValueError(f"invalid receipt: {errs}")
+    path = receipts_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, default=str) + "\n")
+    return row
+
+
+def _iter_jsonl(path: Path):
+    if not path.is_file():
+        return
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+
+def find_receipt(trace_id: str, *, root: Path | None = None) -> dict[str, Any] | None:
+    """Last matching receipt for trace_id (scan receipts + bridge stream)."""
+    hits: list[dict[str, Any]] = []
+    for path in (
+        receipts_path(root),
+        paths.home() / "stream" / "bridge.jsonl",
+        paths.home() / "stream" / "raw.jsonl",
+    ):
+        for row in _iter_jsonl(path) or []:
+            if row.get("trace_id") == trace_id:
+                # bridge nests receipt
+                if "receipt" in row and isinstance(row["receipt"], dict):
+                    merged = dict(row)
+                    nested = dict(row["receipt"])
+                    for k, v in nested.items():
+                        merged.setdefault(k, v)
+                    hits.append(merged)
+                else:
+                    hits.append(row)
+    return hits[-1] if hits else None
+
+
+def join_outcome(
+    trace_id: str,
+    outcome: Outcome | dict[str, Any],
+    *,
+    root: Path | None = None,
+) -> dict[str, Any] | None:
+    """Attach world outcome to a prior decision; append gold/negative to outcomes.jsonl."""
+    base = find_receipt(trace_id, root=root)
+    oc = outcome if isinstance(outcome, Outcome) else Outcome(**{
+        k: v for k, v in outcome.items() if k in Outcome.__dataclass_fields__
+    })
+    oc_dict = oc.to_dict()
+    tier = oc.tier()
+    joined = {
+        "schema": "z0int.outcome_join.v1",
+        "ts": time.time(),
+        "trace_id": trace_id,
+        "outcome": oc_dict,
+        "outcome_tier": tier,
+        "receipt": base,
+    }
+    # always record the join event
+    op = outcomes_path(root)
+    op.parent.mkdir(parents=True, exist_ok=True)
+    with op.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(joined, default=str) + "\n")
+    # update latest receipt row copy into receipts with outcome (append-only)
+    if base is not None:
+        updated = dict(base)
+        updated["outcome"] = oc_dict
+        updated["outcome_tier"] = tier
+        updated["outcome_ts"] = joined["ts"]
+        updated["schema"] = SCHEMA
+        append_receipt(updated, root=root)
+    return joined
+
+
+def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict[str, Any]:
+    """Aggregate estimated savings from receipts + bridge stream."""
+    rows = 0
+    avoided = 0
+    measured = 0
+    with_outcome = 0
+    by_cap: dict[str, int] = {}
+    paths_home = paths.home() if root is None else root
+    candidates = [
+        receipts_path(root),
+        paths_home / "stream" / "bridge.jsonl",
+    ]
+    for path in candidates:
+        for row in list(_iter_jsonl(path) or [])[-limit:]:
+            rec = row.get("receipt") if isinstance(row.get("receipt"), dict) else row
+            if not isinstance(rec, dict):
+                continue
+            rows += 1
+            av = rec.get("estimated_frontier_tokens_avoided")
+            if av is None and row.get("receipt"):
+                av = (row.get("receipt") or {}).get("estimated_frontier_tokens_avoided")
+            if av is not None:
+                try:
+                    avoided += int(av)
+                except (TypeError, ValueError):
+                    pass
+            if rec.get("measured_frontier_tokens") is not None:
+                try:
+                    measured += int(rec["measured_frontier_tokens"])
+                except (TypeError, ValueError):
+                    pass
+            if rec.get("outcome") or row.get("outcome"):
+                with_outcome += 1
+            cap = rec.get("capability_id") or row.get("capability_id") or "unknown"
+            by_cap[str(cap)] = by_cap.get(str(cap), 0) + 1
+    return {
+        "schema": "z0int.tokenomics_summary.v1",
+        "rows": rows,
+        "frontier_tokens_avoided_est": avoided,
+        "measured_frontier_tokens_sum": measured,
+        "rows_with_outcome": with_outcome,
+        "by_capability": by_cap,
+    }

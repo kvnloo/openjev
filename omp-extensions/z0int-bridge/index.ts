@@ -26,6 +26,10 @@ const PY =
 	process.env.EVOLUTION_LAB_PYTHON ||
 	"/workspace/evolution-lab/.venv/bin/python";
 const EL_ROOT = process.env.EVOLUTION_LAB_ROOT || "/workspace/evolution-lab";
+const Z0_PY =
+	process.env.Z0INT_PYTHON ||
+	"/home/kvn/tmp/openjev/.venv/bin/python";
+const Z0_ROOT = process.env.Z0INT_ROOT || "/home/kvn/tmp/openjev";
 const KERD_PY =
 	process.env.KERDOIOS_PYTHON ||
 	process.env.EVOLUTION_LAB_PYTHON ||
@@ -130,36 +134,84 @@ async function turnBridge(prompt: string, sessionId: string | undefined): Promis
 	}
 	const latencyMs = Date.now() - t0;
 	const traceId = randomUUID().replaceAll("-", "");
-	const row = {
-		schema: "z0int.bridge.v1",
-		ts: Date.now() / 1000,
+	const baselineIn =
+		typeof pf.baseline_input_tokens === "number"
+			? pf.baseline_input_tokens
+			: typeof (pf.work_requirement as Jsonish | null)?.estimated_input_tokens === "number"
+				? ((pf.work_requirement as Jsonish).estimated_input_tokens as number)
+				: null;
+	const baselineOut =
+		typeof pf.baseline_output_tokens === "number"
+			? pf.baseline_output_tokens
+			: typeof (pf.work_requirement as Jsonish | null)?.estimated_output_tokens === "number"
+				? ((pf.work_requirement as Jsonish).estimated_output_tokens as number)
+				: null;
+	const avoided =
+		typeof pf.estimated_frontier_tokens_avoided === "number"
+			? pf.estimated_frontier_tokens_avoided
+			: 0;
+	const isLocal = route === "local";
+	const receipt = {
+		schema: "z0int.decision_receipt.v1",
 		trace_id: traceId,
 		session_id: sessionId ?? process.env.OMP_SESSION_ID ?? null,
+		capability_id: capabilityId,
+		provider: isLocal ? "local_mb" : plan ? "kerdoios_plan" : "frontier",
+		model: isLocal ? "mb_local" : null,
+		prediction: typeof pf.label === "string" ? pf.label : typeof pf.prediction === "string" ? pf.prediction : null,
+		confidence: typeof pf.p === "number" ? pf.p : typeof pf.confidence === "number" ? pf.confidence : null,
+		action_taken: route,
+		route,
+		execution: "log_only",
+		outcome: null,
+		input_tokens: isLocal ? 0 : null,
+		output_tokens: isLocal ? 0 : null,
+		baseline_input_tokens: baselineIn,
+		baseline_output_tokens: baselineOut,
+		estimated_frontier_tokens_avoided: avoided,
+		measured_frontier_tokens: null,
+		latency_ms: latencyMs,
+		fallbacks: 0,
+		ts: Date.now() / 1000,
+	};
+	const row = {
+		schema: "z0int.bridge.v1",
+		ts: receipt.ts,
+		trace_id: traceId,
+		session_id: receipt.session_id,
 		prompt: prompt.slice(0, 400),
 		preflight: pf,
 		kerdoios_plan: plan,
 		latency_ms: latencyMs,
-		// Log-only: host still runs its normal model path until promote gate.
 		execution: "log_only",
-		receipt: {
-			route,
-			capability_id: capabilityId,
-			estimated_frontier_tokens_avoided: pf.estimated_frontier_tokens_avoided ?? 0,
-			provider: route === "local" ? "z0int" : null,
-			model: route === "local" ? "mb_local" : null,
-			input_tokens: route === "local" ? 0 : null,
-			output_tokens: route === "local" ? 0 : null,
-		},
+		receipt,
 	};
 	append(STREAM, row);
+	// Dual-write canonical receipts.jsonl via z0int python when available (best-effort).
+	try {
+		const payload = JSON.stringify(receipt);
+		await runCmd(
+			Z0_PY,
+			[
+				"-c",
+				"import json,sys; from z0int.receipt import append_receipt; append_receipt(json.loads(sys.argv[1]))",
+				payload,
+			],
+			Z0_ROOT,
+			3000,
+		);
+	} catch {
+		/* still have bridge.jsonl */
+	}
 	append(SHADOW, {
 		ts: row.ts,
 		trace_id: traceId,
 		route,
 		capability_id: capabilityId,
-		avoided: pf.estimated_frontier_tokens_avoided ?? 0,
+		avoided,
 		plan_ok: plan ? plan.ok !== false && !plan.error : null,
 	});
+
 }
 
 export default function z0intBridge(pi: ExtensionAPI) {

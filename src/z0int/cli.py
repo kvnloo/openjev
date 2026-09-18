@@ -21,6 +21,10 @@ def _print(data: Any, *, as_json: bool, human: str | None = None) -> None:
         print(json.dumps(data, indent=2, default=str))
 
 
+def _bool_opt(s: str) -> bool:
+    return s.lower() in ("1", "true", "yes", "y")
+
+
 def cmd_doctor(*, as_json: bool) -> int:
     from .doctor import format_human, run_doctor
 
@@ -115,10 +119,78 @@ def cmd_data_discover(*, as_json: bool) -> int:
     return 0
 
 
+def cmd_receipt_emit(*, args: argparse.Namespace) -> int:
+    from .receipt import append_receipt, build_receipt
+
+    r = build_receipt(
+        trace_id=args.trace_id,
+        session_id=args.session_id,
+        capability_id=args.capability_id,
+        provider=args.provider,
+        model=args.model,
+        prediction=args.prediction,
+        confidence=args.confidence,
+        action_taken=args.action,
+        route=args.route,
+        execution=args.execution,
+        latency_ms=args.latency_ms,
+        input_tokens=args.input_tokens,
+        output_tokens=args.output_tokens,
+        baseline_input_tokens=args.baseline_in,
+        baseline_output_tokens=args.baseline_out,
+        estimated_frontier_tokens_avoided=args.avoided,
+    )
+    row = append_receipt(r)
+    print(json.dumps(row, indent=2, default=str))
+    return 0
+
+
+def cmd_receipt_join(*, args: argparse.Namespace) -> int:
+    from .receipt import Outcome, join_outcome
+
+    def flag(name: str) -> bool | None:
+        v = getattr(args, name, None)
+        return v if v is not None else None
+
+    oc = Outcome(
+        verified=flag("verified"),
+        success=flag("success"),
+        tool_ok=flag("tool_ok"),
+        test_pass=flag("test_pass"),
+        task_done=flag("task_done"),
+        user_correction=flag("user_correction"),
+        reverted=flag("reverted"),
+        verifier_ok=flag("verifier_ok"),
+        ci_failed=flag("ci_failed"),
+        pr_merged=flag("pr_merged"),
+        note=args.note,
+        source=args.source or "cli",
+    )
+    joined = join_outcome(args.trace_id, oc)
+    print(json.dumps(joined, indent=2, default=str))
+    return 0 if joined else 1
+
+
+def cmd_receipt_summary(*, as_json: bool) -> int:
+    from .receipt import summarize_tokenomics
+
+    s = summarize_tokenomics()
+    _print(
+        s,
+        as_json=as_json,
+        human=(
+            "z0int receipts\n"
+            f"  rows={s.get('rows')}  avoided_est={s.get('frontier_tokens_avoided_est')}\n"
+            f"  with_outcome={s.get('rows_with_outcome')}  caps={s.get('by_capability')}"
+        ),
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="z0int",
-        description="Personal intelligence lifecycle — onboard, doctor, status, models",
+        description="Personal intelligence lifecycle — onboard, doctor, status, models, receipt",
     )
     p.add_argument("--json", action="store_true", dest="as_json", help="Machine-readable JSON output")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -153,6 +225,49 @@ def build_parser() -> argparse.ArgumentParser:
     dd = data_sub.add_parser("discover", help="Find Hermes/OMP/Codex/export paths")
     _json_flag(dd)
 
+    rc = sub.add_parser("receipt", help="Decision receipt spine (trace → outcome → tokens)")
+    rc_sub = rc.add_subparsers(dest="receipt_cmd", required=True)
+    re = rc_sub.add_parser("emit", help="Append a decision receipt")
+    _json_flag(re)
+    re.add_argument("--trace-id", dest="trace_id", default=None)
+    re.add_argument("--session-id", dest="session_id", default=None)
+    re.add_argument("--capability-id", dest="capability_id", default=None)
+    re.add_argument("--provider", default=None)
+    re.add_argument("--model", default=None)
+    re.add_argument("--prediction", default=None)
+    re.add_argument("--confidence", type=float, default=None)
+    re.add_argument("--action", default=None)
+    re.add_argument("--route", default=None)
+    re.add_argument("--execution", default="log_only")
+    re.add_argument("--latency-ms", dest="latency_ms", type=float, default=None)
+    re.add_argument("--input-tokens", dest="input_tokens", type=int, default=None)
+    re.add_argument("--output-tokens", dest="output_tokens", type=int, default=None)
+    re.add_argument("--baseline-in", dest="baseline_in", type=int, default=None)
+    re.add_argument("--baseline-out", dest="baseline_out", type=int, default=None)
+    re.add_argument("--avoided", type=int, default=None)
+
+    rj = rc_sub.add_parser("join", help="Join world outcome to trace_id")
+    _json_flag(rj)
+    rj.add_argument("trace_id")
+    for name, dest in (
+        ("--success", "success"),
+        ("--verified", "verified"),
+        ("--tool-ok", "tool_ok"),
+        ("--test-pass", "test_pass"),
+        ("--task-done", "task_done"),
+        ("--user-correction", "user_correction"),
+        ("--reverted", "reverted"),
+        ("--verifier-ok", "verifier_ok"),
+        ("--ci-failed", "ci_failed"),
+        ("--pr-merged", "pr_merged"),
+    ):
+        rj.add_argument(name, dest=dest, type=_bool_opt, default=None)
+    rj.add_argument("--note", default=None)
+    rj.add_argument("--source", default="cli")
+
+    rs = rc_sub.add_parser("summary", help="Tokenomics rollup from receipts + bridge")
+    _json_flag(rs)
+
     return p
 
 
@@ -160,7 +275,6 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     args = parser.parse_args(argv)
-    # Parent and/or subcommand may set as_json
     as_json = bool(getattr(args, "as_json", False))
 
     if args.cmd == "doctor":
@@ -188,6 +302,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "data":
         if args.data_cmd == "discover":
             return cmd_data_discover(as_json=as_json)
+    if args.cmd == "receipt":
+        if args.receipt_cmd == "emit":
+            return cmd_receipt_emit(args=args)
+        if args.receipt_cmd == "join":
+            return cmd_receipt_join(args=args)
+        if args.receipt_cmd == "summary":
+            return cmd_receipt_summary(as_json=as_json)
     parser.error(f"unknown command: {args.cmd}")
     return 2
 

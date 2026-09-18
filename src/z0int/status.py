@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 from . import doctor, models_mgmt, paths
@@ -22,23 +20,13 @@ def run_status() -> dict[str, Any]:
     sp = paths.home() / "specialists"
     if sp.is_dir():
         specialists = sorted(p.name for p in sp.iterdir() if p.suffix in {".npz", ".json", ".pt"})
-    token_receipts = paths.home() / "tokenomics"
-    avoided = None
-    # best-effort sum from bridge stream
-    bridge = paths.home() / "stream" / "bridge.jsonl"
-    if bridge.is_file():
-        total = 0
-        n = 0
-        try:
-            for line in bridge.read_text(encoding="utf-8").splitlines()[-5000:]:
-                if not line.strip():
-                    continue
-                row = json.loads(line)
-                total += int((row.get("receipt") or {}).get("estimated_frontier_tokens_avoided") or 0)
-                n += 1
-            avoided = {"rows": n, "frontier_tokens_avoided_est": total}
-        except (json.JSONDecodeError, OSError, TypeError, ValueError):
-            avoided = None
+    # best-effort rollup from receipts + bridge stream
+    try:
+        from .receipt import summarize_tokenomics
+
+        avoided = summarize_tokenomics()
+    except Exception:
+        avoided = None
     return {
         "schema": "z0int.status.v1",
         "ok": rep.ok,
@@ -108,7 +96,7 @@ def format_human(st: dict[str, Any]) -> str:
     tok = st.get("tokenomics")
     if tok:
         lines.append("")
-        lines.append("Tokenomics (bridge stream est.)")
+        lines.append("Tokenomics (receipts + bridge)")
         lines.append(f"  frontier tokens avoided ≈ {tok.get('frontier_tokens_avoided_est')} over {tok.get('rows')} rows")
     if st.get("unresolved"):
         lines.append("")

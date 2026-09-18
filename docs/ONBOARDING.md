@@ -74,6 +74,10 @@ python -m evolution_lab preflight "your prompt"
 
 z0int status
 z0int doctor --json
+# decision spine: emit → join world outcome → tokenomics
+z0int receipt emit --capability-id coding.next_action --route local --avoided 1200 --prediction EDIT --confidence 0.9
+z0int receipt join <trace_id> --test-pass true --success true
+z0int receipt summary --json
 ```
 
 ## Models (12GB example)
