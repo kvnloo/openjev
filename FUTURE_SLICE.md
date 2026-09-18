@@ -92,3 +92,9 @@ Implemented on `feat/routine-compiler`:
 Local verification: 9 unit tests passing.
 
 Next future slice: counterexample-driven routine splitting / refinement.
+## AODL binding (implemented)
+
+Routine Compiler + Cascade Compiler now compile to HOTL/AODL 0.2 without extending the ontology. The stable intent graph uses only `task`, `executor`, `service`, `model`, `artifact`, `verifier`, and `stateStore`. Abstract fallback order and Gamma budgets/acceptance stay in AODL; learned thresholds, routine ids, checkpoint/provider selectors, and harness bindings stay in the compiled `plan` so Evolution Lab can change implementation without silently changing user intent. Runtime route/outcome receipts can be appended as AODL `route` + `stateUpdate` events.
+
+See `docs/aodl-integration.md`, `src/z0int/aodl.py`, and `examples/aodl/routine-cascade.json`.
+

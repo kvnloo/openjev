@@ -1,0 +1,638 @@
+{
+  "specVersion": "0.2",
+  "graphId": "z0int-coding.needs_verification",
+  "revision": 0,
+  "intentGraph": {
+    "nodes": [
+      {
+        "id": "capability-coding.needs_verification",
+        "kind": "task",
+        "ports": [
+          {
+            "id": "out",
+            "direction": "out",
+            "schema": "DecisionRequest",
+            "classification": "sanitized"
+          }
+        ],
+        "capabilities": [
+          "request"
+        ],
+        "authorityCeiling": [
+          "request"
+        ],
+        "lifecycle": "declared"
+      },
+      {
+        "id": "z0int-runtime",
+        "kind": "executor",
+        "ports": [
+          {
+            "id": "in",
+            "direction": "in",
+            "schema": "DecisionRequest",
+            "classification": "sanitized"
+          },
+          {
+            "id": "route",
+            "direction": "out",
+            "schema": "StageRequest",
+            "classification": "sanitized"
+          },
+          {
+            "id": "decision",
+            "direction": "out",
+            "schema": "DecisionResult",
+            "classification": "sanitized"
+          }
+        ],
+        "capabilities": [
+          "route",
+          "evaluate"
+        ],
+        "authorityCeiling": [
+          "route",
+          "evaluate"
+        ],
+        "lifecycle": "declared"
+      },
+      {
+        "id": "outcome-verifier",
+        "kind": "verifier",
+        "ports": [
+          {
+            "id": "in",
+            "direction": "in",
+            "schema": "DecisionResult",
+            "classification": "sanitized"
+          },
+          {
+            "id": "out",
+            "direction": "out",
+            "schema": "VerifiedOutcome",
+            "classification": "sanitized"
+          }
+        ],
+        "capabilities": [
+          "verify"
+        ],
+        "authorityCeiling": [
+          "verify"
+        ],
+        "lifecycle": "declared"
+      },
+      {
+        "id": "decision-receipts",
+        "kind": "stateStore",
+        "ports": [
+          {
+            "id": "in",
+            "direction": "in",
+            "schema": "VerifiedOutcome",
+            "classification": "confidential"
+          }
+        ],
+        "capabilities": [
+          "store"
+        ],
+        "authorityCeiling": [
+          "store"
+        ],
+        "lifecycle": "declared"
+      },
+      {
+        "id": "routine-registry",
+        "kind": "artifact",
+        "ports": [
+          {
+            "id": "out",
+            "direction": "out",
+            "schema": "RoutineRegistry",
+            "classification": "local_only"
+          }
+        ],
+        "capabilities": [
+          "provide"
+        ],
+        "authorityCeiling": [
+          "provide"
+        ],
+        "lifecycle": "declared"
+      },
+      {
+        "id": "routine-service",
+        "kind": "service",
+        "ports": [
+          {
+            "id": "in",
+            "direction": "in",
+            "schema": "StageRequest",
+            "classification": "sanitized"
+          },
+          {
+            "id": "registry",
+            "direction": "in",
+            "schema": "RoutineRegistry",
+            "classification": "local_only"
+          },
+          {
+            "id": "out",
+            "direction": "out",
+            "schema": "DecisionResult",
+            "classification": "sanitized"
+          }
+        ],
+        "capabilities": [
+          "evaluate"
+        ],
+        "authorityCeiling": [
+          "evaluate"
+        ],
+        "lifecycle": "declared"
+      },
+      {
+        "id": "stage-specialist",
+        "kind": "model",
+        "ports": [
+          {
+            "id": "in",
+            "direction": "in",
+            "schema": "StageRequest",
+            "classification": "sanitized"
+          },
+          {
+            "id": "out",
+            "direction": "out",
+            "schema": "DecisionResult",
+            "classification": "sanitized"
+          }
+        ],
+        "capabilities": [
+          "infer"
+        ],
+        "authorityCeiling": [
+          "infer"
+        ],
+        "lifecycle": "declared"
+      },
+      {
+        "id": "stage-local-semantic",
+        "kind": "model",
+        "ports": [
+          {
+            "id": "in",
+            "direction": "in",
+            "schema": "StageRequest",
+            "classification": "sanitized"
+          },
+          {
+            "id": "out",
+            "direction": "out",
+            "schema": "DecisionResult",
+            "classification": "sanitized"
+          }
+        ],
+        "capabilities": [
+          "infer"
+        ],
+        "authorityCeiling": [
+          "infer"
+        ],
+        "lifecycle": "declared"
+      },
+      {
+        "id": "stage-frontier",
+        "kind": "model",
+        "ports": [
+          {
+            "id": "in",
+            "direction": "in",
+            "schema": "StageRequest",
+            "classification": "sanitized"
+          },
+          {
+            "id": "out",
+            "direction": "out",
+            "schema": "DecisionResult",
+            "classification": "sanitized"
+          }
+        ],
+        "capabilities": [
+          "infer"
+        ],
+        "authorityCeiling": [
+          "infer"
+        ],
+        "lifecycle": "declared"
+      }
+    ],
+    "edges": [
+      {
+        "id": "e-task-runtime",
+        "relation": "dependency",
+        "from": "capability-coding.needs_verification",
+        "to": "z0int-runtime",
+        "fromPort": "out",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "route"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-runtime-verify",
+        "relation": "verification",
+        "from": "z0int-runtime",
+        "to": "outcome-verifier",
+        "fromPort": "decision",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "verify"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-verify-receipts",
+        "relation": "observation",
+        "from": "outcome-verifier",
+        "to": "decision-receipts",
+        "fromPort": "out",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "store"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-routine-artifact",
+        "relation": "artifact",
+        "from": "routine-registry",
+        "to": "routine-service",
+        "fromPort": "out",
+        "toPort": "registry",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-runtime-routine",
+        "relation": "allocation",
+        "from": "z0int-runtime",
+        "to": "routine-service",
+        "fromPort": "route",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "evaluate"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-routine-verify",
+        "relation": "verification",
+        "from": "routine-service",
+        "to": "outcome-verifier",
+        "fromPort": "out",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "verify"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-runtime-stage-specialist",
+        "relation": "allocation",
+        "from": "z0int-runtime",
+        "to": "stage-specialist",
+        "fromPort": "route",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "infer"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-stage-specialist-verify",
+        "relation": "verification",
+        "from": "stage-specialist",
+        "to": "outcome-verifier",
+        "fromPort": "out",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "verify"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-runtime-stage-local-semantic",
+        "relation": "allocation",
+        "from": "z0int-runtime",
+        "to": "stage-local-semantic",
+        "fromPort": "route",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "infer"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-stage-local-semantic-verify",
+        "relation": "verification",
+        "from": "stage-local-semantic",
+        "to": "outcome-verifier",
+        "fromPort": "out",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "verify"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-runtime-stage-frontier",
+        "relation": "allocation",
+        "from": "z0int-runtime",
+        "to": "stage-frontier",
+        "fromPort": "route",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "infer"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      },
+      {
+        "id": "e-stage-frontier-verify",
+        "relation": "verification",
+        "from": "stage-frontier",
+        "to": "outcome-verifier",
+        "fromPort": "out",
+        "toPort": "in",
+        "delivery": {
+          "order": "ordered",
+          "idempotent": true,
+          "timeoutMs": 60000,
+          "maxRetries": 0
+        },
+        "authority": {
+          "grant": [
+            "verify"
+          ],
+          "delegationDepth": 0
+        },
+        "provenance": {
+          "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+        }
+      }
+    ]
+  },
+  "policies": {
+    "kinds": [
+      "router",
+      "sequence"
+    ],
+    "fanIn": "any",
+    "dynamic": {
+      "allowed": false,
+      "maxChildren": 0,
+      "maxDepth": 0
+    },
+    "route": {
+      "strategy": "first_eligible",
+      "order": [
+        "routine-service",
+        "stage-specialist",
+        "stage-local-semantic",
+        "stage-frontier"
+      ],
+      "eligibility": "compiled_plan_binding",
+      "abstain": "next",
+      "final": "stage-frontier"
+    }
+  },
+  "constraints": {
+    "budgets": {
+      "tokens": 4000,
+      "premium_tokens": 1000,
+      "latency_ms": 1500,
+      "joules": 25.0
+    },
+    "termination": {
+      "on": "outcome-verifier.succeeded"
+    },
+    "acceptance": {
+      "capabilityId": "coding.needs_verification",
+      "precisionFloor": 0.98,
+      "maxSuccessRegression": 0.01,
+      "objective": "premium_tokens_per_verified_success"
+    },
+    "privacy": {
+      "personalArtifacts": "local_only",
+      "receipts": "confidential"
+    }
+  },
+  "provenance": {
+    "source": "z0int",
+    "sourceHash": "2824b08b95f389f5b33fc49d9390561c2eedab256ab177b8d8b9923aff4be09a"
+  },
+  "plan": {
+    "compiler": "z0int.aodl.v1",
+    "harnessId": "omp",
+    "bindings": {
+      "z0int-runtime": {
+        "runtime": "z0int",
+        "entrypoint": "preflight",
+        "harnessId": "omp"
+      },
+      "outcome-verifier": {
+        "runtime": "z0int",
+        "entrypoint": "outcome"
+      },
+      "decision-receipts": {
+        "runtime": "z0int",
+        "uri": "z0int://receipts"
+      },
+      "routine-registry": {
+        "artifactType": "z0int.routine_registry.v1",
+        "uri": "z0int://routines",
+        "routineIds": [
+          "7704321a24a8c8fd204f692b"
+        ],
+        "enabled": true
+      },
+      "routine-service": {
+        "runtime": "z0int",
+        "entrypoint": "routine_registry.decide",
+        "enabled": true,
+        "failOpen": "next_route_stage"
+      },
+      "stage-specialist": {
+        "binding": "artifact",
+        "uri": "z0int://specialists/needs-verification/mb",
+        "implementationStage": "mb",
+        "logicalRole": "specialist",
+        "enabled": true,
+        "minConfidence": 0.95,
+        "terminal": false
+      },
+      "stage-local-semantic": {
+        "binding": "resource",
+        "selector": {
+          "class": "local_semantic"
+        },
+        "implementationStage": "local_slm",
+        "logicalRole": "local-semantic",
+        "enabled": true,
+        "minConfidence": 0.9,
+        "terminal": false
+      },
+      "stage-frontier": {
+        "binding": "resource",
+        "selector": {
+          "class": "frontier"
+        },
+        "implementationStage": "frontier",
+        "logicalRole": "frontier",
+        "enabled": true,
+        "minConfidence": 0.0,
+        "terminal": true
+      }
+    },
+    "route": {
+      "order": [
+        "routine-service",
+        "stage-specialist",
+        "stage-local-semantic",
+        "stage-frontier"
+      ],
+      "thresholds": {
+        "stage-specialist": 0.95,
+        "stage-local-semantic": 0.9
+      },
+      "final": "stage-frontier"
+    },
+    "sourceSchemas": {
+      "cascade": "z0int.cascade_policy.v1",
+      "routine": "z0int.routine_candidate.v1"
+    },
+    "note": "AODL owns intent/policy/budgets; z0int owns implementation; provider placement may be resolved by Kerdoios."
+  },
+  "eventLog": []
+}
