@@ -202,7 +202,7 @@ promote verified winner
 
 The ABAB meta-loop can evolve both **what data to train on** and **which architecture to use**. The benchmark, privacy boundary, and sealed evaluation set stay outside the evolvable surface.
 
-## Current foundation: OpenJev
+## Current foundation: OpenJev runtime
 
 The code in this repository currently reproduces the useful *interface pattern* of TypeSafe Jev with open components. It does not reproduce Jev's undisclosed model or training.
 
@@ -215,6 +215,8 @@ Current capabilities include:
 - frozen benchmark/evaluation bundles;
 - integration with Evolution Lab and FlyForge.
 
+This is **setup for the runtime that exists today**. Personal-history onboarding (P1 in [ROADMAP.md](ROADMAP.md)) is not implemented yet.
+
 ### Quick start
 
 Python 3.10+, CUDA, and a GPU that can hold a 4B BF16 model:
@@ -224,7 +226,11 @@ python -m venv .venv
 . .venv/bin/activate
 export HF_HOME=/path/to/large-drive/huggingface
 pip install -e '.[test]'
+```
 
+Owned example (typed option scores, timing, model revision, prompt hash):
+
+```bash
 CUDA_VISIBLE_DEVICES=0 openjev-score \
   --mode direct \
   --model Qwen/Qwen3.5-4B \
@@ -233,15 +239,64 @@ CUDA_VISIBLE_DEVICES=0 openjev-score \
   --output results.jsonl
 ```
 
-On the committed RTX 3090 benchmark, direct typed logits returned 21 probability pairs in a median **1.023 s** versus **5.332 s** for the compact autoregressive JSON-array baseline. See [docs/RESULTS.md](docs/RESULTS.md), [docs/METHOD.md](docs/METHOD.md), and the committed raw results for the exact scope and limitations.
+If every row has the same exact state, use `--mode shared` to prefill once and score criteria in parallel.
+
+On the committed RTX 3090 benchmark, direct typed logits returned 21 probability pairs in a median **1.023 s** versus **5.332 s** for the compact autoregressive JSON-array baseline. Exact scope and limitations: [docs/RESULTS.md](docs/RESULTS.md), [docs/METHOD.md](docs/METHOD.md), [docs/REPRODUCE.md](docs/REPRODUCE.md).
+
+### FlyForge stack (this repo + Evolution Lab)
+
+Clone **this repo first**. It is the runtime. [Evolution Lab](https://github.com/kvnloo/evolution-lab) is the evolve sidecar (genomes, locked splits, promotion, DAgger, ABAB).
+
+```bash
+bash scripts/setup-flyforge.sh
+# installs this package, clones evolution-lab @ nightly, locks splits, prints smoke commands
+```
+
+Contract: [docs/evolution-lab.md](docs/evolution-lab.md) (Track A recovery fly, Track B JEV heads, export paths).
+
+### Route A: trainable scorers
+
+When zero-shot direct readout is not enough, train a one-pass option head on labelled JSONL:
+
+```bash
+pip install -e '.[test]'
+openjev-data synthetic --output data/synthetic
+openjev-train data/synthetic/train.jsonl --validation data/synthetic/validation.jsonl \
+  --output runs/synthetic.pt --device cuda
+openjev-eval runs/synthetic.pt data/synthetic/test.jsonl
+```
+
+Details: [docs/jevlike-trainable-route.md](docs/jevlike-trainable-route.md). Optional `pip install -e '.[games]'` for Wikispeedia / Doom / Chess examples.
+
+### Route C: vLLM DiffusionGemma
+
+When a local vLLM with structured diffusion reads is up:
+
+```bash
+bash scripts/setup-vllm-diffusion.sh
+
+openjev-score --mode vllm \
+  --upstream http://127.0.0.1:8000 \
+  --model dgemma \
+  --tokenizer nvidia/diffusiongemma-26B-A4B-it-NVFP4 \
+  --input examples/decisions.jsonl \
+  --output results-vllm.jsonl
+```
+
+Details: [docs/vllm-diffusion-route.md](docs/vllm-diffusion-route.md).
 
 ## Repository map
 
 - [ROADMAP.md](ROADMAP.md) - long-term z0int build order
-- [docs/evolution-lab.md](docs/evolution-lab.md) - current FlyForge integration
+- [docs/evolution-lab.md](docs/evolution-lab.md) - FlyForge / Evolution Lab contract
 - [docs/RESULTS.md](docs/RESULTS.md) - measured OpenJev results
 - [docs/METHOD.md](docs/METHOD.md) - frozen evaluation methodology
-- [benchmarks/](benchmarks/) - reproducible benchmark fixtures
+- [docs/REPRODUCE.md](docs/REPRODUCE.md) - pinned environment and verification
+- [docs/jevlike-trainable-route.md](docs/jevlike-trainable-route.md) - Route A
+- [docs/vllm-diffusion-route.md](docs/vllm-diffusion-route.md) - Route C
+- [benchmarks/](benchmarks/) - reproducible fixtures
+- [demo/index.html](demo/index.html) - interactive replay
+- [webgpu-demo/index.html](webgpu-demo/index.html) - browser-only demo
 - [src/openjev_phase1/](src/openjev_phase1/) - current scoring/runtime implementation
 
 ## Principles
