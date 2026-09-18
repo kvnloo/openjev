@@ -1353,8 +1353,12 @@ DONE (2026-09-17, evolution-lab nightly b9e4db5)
   10. gpu-abab: A mutates DataRecipe, B trains P=256, keep iff GPU>ridge+1pp and majority
       8 waves, 2 keeps (wave 4 n=16384; wave 5 full split).
 
-NOW
+NOW / DONE (2026-09-17 session resume)
   9. shadow in live harness using wave-5 champion pack; Jev only on ambiguous cases
+     - wave-5 pack locked: n_kc=96 k_winners=20 pn_dim=64 confirm=0.572 (beats ridge 0.363)
+     - promote-only writes: weaker GPU runs no longer clobber `data/next_action/champion.*`
+     - CLI: `next-action-confirm` (offline confirm), `next-action-shadow` (append row)
+     - OMP extension `flyforge-jev`: before_agent_start log-only cascade to `~/.z0int/shadow/jev-fly.jsonl`
   persist data/next_action/champion.json + runs/gpu-evolve/next_action_champion.npz
 
 LATER
