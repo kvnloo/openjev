@@ -70,3 +70,25 @@ its verifier.**
 - no editing the sealed judge;
 - no replacing a specialist solely because a rule matches its predictions on training data;
 - no free-form code generation in the hot path.
+
+## Local implementation status
+
+Implemented on `feat/routine-compiler`:
+
+- `07bc4f8` — Routine Compiler V1
+  - safe declarative rule AST (`eq`/`ge`/`le`, conjunction depth <=2)
+  - train-only discovery, dev pruning, sealed credit, future drift demotion
+  - independent-session support floors and prior-lift guard
+  - fail-open runtime `RoutineRegistry`
+  - JSONL round-trip + CLI
+- `fc5ba5b` — Cascade Compiler V1
+  - dev-only confidence-threshold search
+  - objective: premium tokens per verified success
+  - frontier baseline non-inferiority constraint
+  - sealed-only credit + future drift demotion
+  - optional routine stage represented as `available:false` on no match
+  - provider-independent; Kerdoios remains residual compute allocator
+
+Local verification: 9 unit tests passing.
+
+Next future slice: counterexample-driven routine splitting / refinement.
