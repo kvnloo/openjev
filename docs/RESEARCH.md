@@ -1370,19 +1370,24 @@ NOW / DONE (2026-09-17 → data-engine pivot)
      - flyforge-jev OMP extension: log-only multi-session writer
      - `evolution_lab.live_stream` + `pn_features` structured-cue scaffold
 
-NEXT (self-improving loop — no MaleCNS/FlyGym/Memento yet)
-  11. DONE offline 2×2: old_labels+rich_PN wins → gen-1 promoted
-      confirm 0.630 > gen-0 0.572; coverage@95% 0.287 > 0.199; cascade local_prec ~0.90
-      features: hash64 + structured cues (tool/phase/session); pack pn_dim=124
-      gen-0 backup: evolution-lab runs/gpu-evolve/gen0_champion_backup.npz
-  12. run 4× OMP sessions → fill live stream (session holdout A+B+C / test D)
-  13. join outcomes (test/tool/retry/user correction) → upgrade unlabeled→soft→gold
-  14. teacher cascade: fly conf → OpenJev 0.6B → 4B → sparse real Jev
-  15. GPU pop retrain after ~500–2k high-info rows; ABAB mutates data mixture + features
-
+NEXT (capability cartography — not more next-action thrash)
+  11. DONE offline 2×2 rich PN → gen-1 (DEV metrics); gen-0 backup kept
+  12. DONE Capability Miner (`evolution_lab capability-mine`):
+      - session-sealed split (train/dev/sealed); confirm row-split = DEV only
+      - CapabilityCard / BenchmarkSpec / CapabilityResult schemas
+      - atlas + cards + specs + top3 + gaps under ~/.z0int/research/
+      - SEALED L0: when MB predicts DELEGATE, precision≈0.982 n_pred≈3053
+      - SEALED multiclass MB≈0.55 vs ridge≈0.12 (majority inflated by DEL skew)
+  13. TOP3 specialists to benchmark next (not global acc):
+      a. delegate_gating (typed yes/no; L0 sharp; need L2 wall-clock/outcome)
+      b. recovery_action (existing P0 gym; high label quality)
+      c. needs_verification (after EDIT; high failure cost; need test joins)
+  14. outcome joins → L2/L3; live stream fill; teacher cascade on high-info only
+  15. ABAB at TASK×DATA×MODEL×POLICY level; Capability Atlas is the fitness surface
 
 LATER
-  16. Memento / FlyGym / MaleCNS / 5B — only after safe local coverage@95% meaningfully improves
+  16. Memento / FlyGym / MaleCNS / 5B — only if atlas says remaining niches need them
+
 
 ```
 
