@@ -21,7 +21,8 @@ const closed = await closeOpenTurn({
   measured: meas,
   inputTokens: Math.round(meas*0.75),
   outputTokens: Math.round(meas*0.25),
-  success: true, testPass: true, toolOk: true,
+  executionCompleted: true,
+  testPass: true,
   source: 'e2e_spine_sh',
   provider: 'e2e', model: 'script',
 });

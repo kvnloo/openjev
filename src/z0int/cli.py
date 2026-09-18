@@ -153,6 +153,8 @@ def cmd_receipt_join(*, args: argparse.Namespace) -> int:
         return v if v is not None else None
 
     oc = Outcome(
+        execution_completed=flag("execution_completed"),
+        verified_success=flag("verified_success"),
         verified=flag("verified"),
         success=flag("success"),
         tool_ok=flag("tool_ok"),
@@ -165,11 +167,11 @@ def cmd_receipt_join(*, args: argparse.Namespace) -> int:
         pr_merged=flag("pr_merged"),
         note=args.note,
         source=args.source or "cli",
+        verification_source=getattr(args, "verification_source", None),
     )
     joined = join_outcome(args.trace_id, oc)
     print(json.dumps(joined, indent=2, default=str))
     return 0 if joined else 1
-
 
 
 def cmd_receipt_close(*, args: argparse.Namespace) -> int:
@@ -180,11 +182,26 @@ def cmd_receipt_close(*, args: argparse.Namespace) -> int:
         return v if v is not None else None
 
     oc = None
-    if any(flag(n) is not None for n in (
-        "verified","success","tool_ok","test_pass","task_done",
-        "user_correction","reverted","verifier_ok","ci_failed","pr_merged",
-    )) or args.note:
+    if any(
+        flag(n) is not None
+        for n in (
+            "execution_completed",
+            "verified_success",
+            "verified",
+            "success",
+            "tool_ok",
+            "test_pass",
+            "task_done",
+            "user_correction",
+            "reverted",
+            "verifier_ok",
+            "ci_failed",
+            "pr_merged",
+        )
+    ) or args.note:
         oc = Outcome(
+            execution_completed=flag("execution_completed"),
+            verified_success=flag("verified_success"),
             verified=flag("verified"),
             success=flag("success"),
             tool_ok=flag("tool_ok"),
@@ -197,6 +214,7 @@ def cmd_receipt_close(*, args: argparse.Namespace) -> int:
             pr_merged=flag("pr_merged"),
             note=args.note,
             source=args.source or "cli",
+            verification_source=getattr(args, "verification_source", None),
         )
     closed = close_turn(
         args.trace_id,
@@ -292,6 +310,8 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(rj)
     rj.add_argument("trace_id")
     for name, dest in (
+        ("--execution-completed", "execution_completed"),
+        ("--verified-success", "verified_success"),
         ("--success", "success"),
         ("--verified", "verified"),
         ("--tool-ok", "tool_ok"),
@@ -306,7 +326,7 @@ def build_parser() -> argparse.ArgumentParser:
         rj.add_argument(name, dest=dest, type=_bool_opt, default=None)
     rj.add_argument("--note", default=None)
     rj.add_argument("--source", default="cli")
-
+    rj.add_argument("--verification-source", dest="verification_source", default=None)
 
     rcl = rc_sub.add_parser("close", help="Post-turn: measured tokens + optional outcome join")
     _json_flag(rcl)
@@ -319,6 +339,8 @@ def build_parser() -> argparse.ArgumentParser:
     rcl.add_argument("--provider", default=None)
     rcl.add_argument("--model", default=None)
     for name, dest in (
+        ("--execution-completed", "execution_completed"),
+        ("--verified-success", "verified_success"),
         ("--success", "success"),
         ("--verified", "verified"),
         ("--tool-ok", "tool_ok"),
@@ -333,9 +355,28 @@ def build_parser() -> argparse.ArgumentParser:
         rcl.add_argument(name, dest=dest, type=_bool_opt, default=None)
     rcl.add_argument("--note", default=None)
     rcl.add_argument("--source", default="cli")
+    rcl.add_argument("--verification-source", dest="verification_source", default=None)
 
     rs = rc_sub.add_parser("summary", help="Tokenomics rollup from receipts + bridge")
     _json_flag(rs)
+
+    cf = sub.add_parser(
+        "counterfactual",
+        help="Paired Grok reference cartography (historical mine + non-inferiority)",
+    )
+    cf_sub = cf.add_subparsers(dest="counterfactual_cmd", required=True)
+    cfm = cf_sub.add_parser("mine", help="Mine historical Grok OMP turns into replay snapshots")
+    _json_flag(cfm)
+    cfm.add_argument(
+        "--sessions-root",
+        default=None,
+        help="OMP sessions root (default: ~/.omp/agent/sessions or symlink target)",
+    )
+    cfm.add_argument("--limit", type=int, default=5000, help="Max assistant turns to scan")
+    cfm.add_argument("--provider-substr", default="xai,grok", help="Comma substrings for reference providers/models")
+    cfs = cf_sub.add_parser("summary", help="Replay grade / pair inventory")
+    _json_flag(cfs)
+
 
     return p
 
@@ -380,6 +421,13 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_receipt_close(args=args)
         if args.receipt_cmd == "summary":
             return cmd_receipt_summary(as_json=as_json)
+    if args.cmd == "counterfactual":
+        from .counterfactual import cmd_mine, cmd_summary
+
+        if args.counterfactual_cmd == "mine":
+            return cmd_mine(args=args, as_json=as_json)
+        if args.counterfactual_cmd == "summary":
+            return cmd_summary(args=args, as_json=as_json)
     parser.error(f"unknown command: {args.cmd}")
     return 2
 

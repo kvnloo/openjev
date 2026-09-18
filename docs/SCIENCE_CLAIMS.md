@@ -50,6 +50,23 @@ L0/L1 labels are **not** world success. First L2 card is **`recovery_action`**
 (gym closed-loop + locked P0). Live harness joins still use `trace_id` via
 `z0int receipt join` / `outcome_gold` for world events outside the gym.
 
+## Evidence semantics (receipt outcomes)
+
+Do **not** train routers on ambient turn completion.
+
+| Signal | Meaning | `outcome_tier` | Counts as `verified_tasks`? |
+| --- | --- | --- | --- |
+| `execution_completed` | Agent turn finished | `execution` | no |
+| `tool_ok` / bare `success` | Transport/soft legacy | `soft` | no |
+| `test_pass` / `verifier_ok` / `pr_merged` / `task_done` / `verified_success` | Real quality | `gold` | yes |
+| `user_correction` / `reverted` / `ci_failed` | Failure | `negative` | no |
+
+Ambient OMP `turn_end` must emit `execution_completed=true` with `verified_success=null`.
+Async `z0int receipt join` attaches gold later. Kerdoios `--completed` only on verified arms.
+
+Provider/model on every arm must be the **actual** model version when known (not `kerdoios_plan`/`session` placeholders once usage is on the message).
+
+
 ## First L2 specialist (locked pick)
 
 **`recovery_action`** — not `needs_verification`, not `delegate_gating`.

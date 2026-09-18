@@ -37,11 +37,25 @@ def new_trace_id() -> str:
 
 @dataclass
 class Outcome:
-    """World consequences joined later via ``trace_id``."""
+    """World consequences joined later via ``trace_id``.
 
-    verified: bool | None = None
-    success: bool | None = None
-    tool_ok: bool | None = None
+    Evidence semantics (do not collapse these):
+
+    - ``execution_completed`` — harness turn finished (agent returned). Not quality.
+    - ``tool_ok`` — a tool call returned without transport error. Not quality.
+    - ``success`` — legacy soft flag; does **not** mint gold by itself.
+    - ``verified_success`` / ``verified`` — explicit quality verdict (async join OK).
+    - ``test_pass`` / ``verifier_ok`` / ``pr_merged`` / ``task_done`` — gold signals.
+
+    Ambient OMP ``turn_end`` should set ``execution_completed=true`` and leave
+    ``verified_success=null`` until CI/tests/user-correction/join.
+    """
+
+    execution_completed: bool | None = None
+    verified_success: bool | None = None
+    verified: bool | None = None  # alias; prefer verified_success
+    success: bool | None = None  # soft / legacy — never alone → gold
+    tool_ok: bool | None = None  # tool transport OK — never alone → gold
     test_pass: bool | None = None
     task_done: bool | None = None
     user_correction: bool | None = None
@@ -51,27 +65,59 @@ class Outcome:
     pr_merged: bool | None = None
     retries: int | None = None
     note: str | None = None
-    source: str | None = None  # hermes|omp|ci|manual|...
+    source: str | None = None  # hermes|omp|ci|manual|bridge_turn_end|...
+    verification_source: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
 
     def tier(self) -> str:
+        """Classify outcome strength for training / tokenomics.
+
+        Returns:
+          gold | negative | execution | soft
+
+        Gold requires a *verification* signal, not mere turn completion.
+        """
         d = self.to_dict()
-        strong = any(
-            d.get(k) is True
-            for k in ("test_pass", "tool_ok", "task_done", "verifier_ok", "pr_merged", "success")
-        )
-        if d.get("verified") is True and d.get("success") is True:
-            strong = True
         negative = any(
             d.get(k) is True for k in ("user_correction", "reverted", "ci_failed")
-        ) or any(d.get(k) is False for k in ("test_pass", "tool_ok", "success", "verified"))
-        if strong and not negative:
-            return "gold"
+        ) or any(
+            d.get(k) is False
+            for k in (
+                "test_pass",
+                "verifier_ok",
+                "verified_success",
+                "verified",
+                "pr_merged",
+                "task_done",
+            )
+        )
         if negative:
             return "negative"
+        gold = any(
+            d.get(k) is True
+            for k in (
+                "verified_success",
+                "verified",
+                "test_pass",
+                "verifier_ok",
+                "pr_merged",
+                "task_done",
+            )
+        )
+        if gold:
+            return "gold"
+        if d.get("execution_completed") is True:
+            return "execution"
+        # bare success / tool_ok are soft evidence only
+        if d.get("success") is True or d.get("tool_ok") is True:
+            return "soft"
         return "soft"
+
+    def is_verified(self) -> bool:
+        """True only when a verification signal supports quality learning."""
+        return self.tier() == "gold"
 
 
 @dataclass
@@ -176,6 +222,62 @@ def build_receipt(
         fallbacks=fallbacks,
         extra=dict(extra or {}),
     )
+
+
+# Optional experiment / counterfactual keys stored on receipt.extra (or top-level).
+EXPERIMENT_KEYS = (
+    "experiment_id",
+    "pair_id",
+    "task_snapshot_id",
+    "arm_id",  # candidate | reference | audit
+    "treatment_hash",
+    "selection_policy",  # active | audit | historical_replay | production
+    "assignment_probability",
+    "reference_requested",
+    "reason_for_reference",
+    "replay_grade",  # A|B|C|D
+    "verifier_class",
+)
+
+
+def attach_experiment(receipt: dict[str, Any] | DecisionReceipt, **fields: Any) -> dict[str, Any]:
+    """Merge counterfactual experiment identity onto a receipt dict."""
+    row = receipt.to_dict() if isinstance(receipt, DecisionReceipt) else dict(receipt)
+    extra = dict(row.get("extra") or {})
+    for k in EXPERIMENT_KEYS:
+        if k in fields and fields[k] is not None:
+            extra[k] = fields[k]
+            row[k] = fields[k]
+    if extra:
+        row["extra"] = extra
+    return row
+
+
+def treatment_hash(
+    *,
+    model_version: str | None = None,
+    reasoning_effort: str | None = None,
+    system_prompt_hash: str | None = None,
+    skills_hash: str | None = None,
+    context_policy: str | None = None,
+    tool_schema_hash: str | None = None,
+    temperature: float | None = None,
+) -> str:
+    """Stable fingerprint of a model/prompt/context treatment arm."""
+    import hashlib
+
+    payload = {
+        "model_version": model_version,
+        "reasoning_effort": reasoning_effort,
+        "system_prompt_hash": system_prompt_hash,
+        "skills_hash": skills_hash,
+        "context_policy": context_policy,
+        "tool_schema_hash": tool_schema_hash,
+        "temperature": temperature,
+    }
+    blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:16]
+
 
 
 def validate_receipt(raw: dict[str, Any]) -> list[str]:
@@ -418,16 +520,37 @@ def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict
                 rows_with_both += 1
                 actual_saved += max(0, base_tot - meas_i)
             outcome = rec.get("outcome") or row.get("outcome")
-            if outcome:
+            tier = rec.get("outcome_tier") or row.get("outcome_tier")
+            if outcome or tier:
                 with_outcome += 1
                 is_v = False
-                if isinstance(outcome, dict):
-                    is_v = bool(
-                        outcome.get("verified") is True
-                        or outcome.get("success") is True
-                        or outcome.get("test_pass") is True
-                        or outcome.get("tool_ok") is True
-                        or outcome.get("pr_merged") is True
+                if tier == "gold":
+                    is_v = True
+                elif isinstance(outcome, dict):
+                    # Never treat bare success/tool_ok as verified.
+                    is_v = any(
+                        outcome.get(k) is True
+                        for k in (
+                            "verified_success",
+                            "verified",
+                            "test_pass",
+                            "verifier_ok",
+                            "pr_merged",
+                            "task_done",
+                        )
+                    ) and not any(
+                        outcome.get(k) is True
+                        for k in ("user_correction", "reverted", "ci_failed")
+                    ) and not any(
+                        outcome.get(k) is False
+                        for k in (
+                            "test_pass",
+                            "verifier_ok",
+                            "verified_success",
+                            "verified",
+                            "pr_merged",
+                            "task_done",
+                        )
                     )
                 if is_v:
                     verified += 1

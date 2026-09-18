@@ -197,13 +197,21 @@ async function turnBridge(prompt: string, sessionId: string | undefined): Promis
 			? pf.estimated_frontier_tokens_avoided
 			: 0;
 	const isLocal = route === "local";
+	// Prefer concrete placement from Kerdoios when residual is planned.
+	let planProvider: string | null = null;
+	let planModel: string | null = null;
+	if (plan && Array.isArray(plan.placements) && plan.placements.length > 0) {
+		const top = plan.placements[0] as Jsonish;
+		if (typeof top.provider === "string") planProvider = top.provider;
+		if (typeof top.model === "string") planModel = top.model;
+	}
 	const receipt: Jsonish = {
 		schema: "z0int.decision_receipt.v1",
 		trace_id: traceId,
 		session_id: sessionId ?? process.env.OMP_SESSION_ID ?? null,
 		capability_id: capabilityId,
-		provider: isLocal ? "local_mb" : plan ? "kerdoios_plan" : "frontier",
-		model: isLocal ? "mb_local" : null,
+		provider: isLocal ? "local_mb" : planProvider || (plan ? "kerdoios_plan" : "frontier"),
+		model: isLocal ? "mb_local" : planModel,
 		prediction:
 			typeof pf.label === "string"
 				? pf.label
@@ -272,9 +280,74 @@ function estimateMeasuredFromMessages(messages: unknown[]): {
 	input_tokens: number;
 	output_tokens: number;
 	measured: number;
+	provider: string | null;
+	model: string | null;
+	usage_source: "provider_usage" | "char_proxy";
 } {
-	// Cheap proxy when harness does not expose provider usage: char/4.
-	// Still proves close path; replace when OMP surfaces real usage.
+	// Prefer real provider usage on the last assistant message when present.
+	let provider: string | null = null;
+	let model: string | null = null;
+	let usageIn: number | null = null;
+	let usageOut: number | null = null;
+	for (let i = (messages || []).length - 1; i >= 0; i--) {
+		const m = messages[i];
+		if (!m || typeof m !== "object") continue;
+		const role = String((m as { role?: unknown }).role || "");
+		if (role && role !== "assistant") continue;
+		const p = (m as { provider?: unknown }).provider;
+		const mo = (m as { model?: unknown }).model;
+		if (typeof p === "string" && p) provider = p;
+		if (typeof mo === "string" && mo) model = mo;
+		const usage = (m as { usage?: unknown }).usage;
+		if (usage && typeof usage === "object") {
+			const u = usage as {
+				input?: unknown;
+				output?: unknown;
+				input_tokens?: unknown;
+				output_tokens?: unknown;
+				totalTokens?: unknown;
+			};
+			const inn = u.input ?? u.input_tokens;
+			const out = u.output ?? u.output_tokens;
+			if (typeof inn === "number") usageIn = inn;
+			if (typeof out === "number") usageOut = out;
+			if (usageIn != null || usageOut != null) break;
+		}
+		// also accept nested message wrapper
+		const nested = (m as { message?: unknown }).message;
+		if (nested && typeof nested === "object") {
+			const nm = nested as {
+				role?: unknown;
+				provider?: unknown;
+				model?: unknown;
+				usage?: unknown;
+			};
+			if (String(nm.role || "assistant") === "assistant") {
+				if (typeof nm.provider === "string") provider = nm.provider;
+				if (typeof nm.model === "string") model = nm.model;
+				const usage2 = nm.usage;
+				if (usage2 && typeof usage2 === "object") {
+					const u2 = usage2 as { input?: unknown; output?: unknown };
+					if (typeof u2.input === "number") usageIn = u2.input;
+					if (typeof u2.output === "number") usageOut = u2.output;
+					if (usageIn != null || usageOut != null) break;
+				}
+			}
+		}
+	}
+	if (usageIn != null || usageOut != null) {
+		const input_tokens = Math.max(0, Math.round(usageIn || 0));
+		const output_tokens = Math.max(0, Math.round(usageOut || 0));
+		return {
+			input_tokens,
+			output_tokens,
+			measured: input_tokens + output_tokens,
+			provider,
+			model,
+			usage_source: "provider_usage",
+		};
+	}
+	// Fallback proxy when harness does not expose provider usage: char/4.
 	let userChars = 0;
 	let asstChars = 0;
 	for (const m of messages || []) {
@@ -293,7 +366,14 @@ function estimateMeasuredFromMessages(messages: unknown[]): {
 	}
 	const input_tokens = Math.max(1, Math.round(userChars / 4));
 	const output_tokens = Math.max(1, Math.round(asstChars / 4));
-	return { input_tokens, output_tokens, measured: input_tokens + output_tokens };
+	return {
+		input_tokens,
+		output_tokens,
+		measured: input_tokens + output_tokens,
+		provider,
+		model,
+		usage_source: "char_proxy",
+	};
 }
 
 async function closeOpenTurn(opts: {
@@ -304,6 +384,8 @@ async function closeOpenTurn(opts: {
 	success?: boolean;
 	testPass?: boolean;
 	toolOk?: boolean;
+	executionCompleted?: boolean;
+	verifiedSuccess?: boolean;
 	source?: string;
 	provider?: string;
 	model?: string;
@@ -333,9 +415,19 @@ async function closeOpenTurn(opts: {
 	if (opts.outputTokens != null) args.push("--output-tokens", String(opts.outputTokens));
 	if (opts.provider) args.push("--provider", opts.provider);
 	if (opts.model) args.push("--model", opts.model);
-	if (opts.success != null) args.push("--success", opts.success ? "true" : "false");
+	// Evidence split: execution vs verified. Never gold from bare success/toolOk.
+	const execDone = opts.executionCompleted ?? true;
+	args.push("--execution-completed", execDone ? "true" : "false");
+	if (opts.verifiedSuccess != null) {
+		args.push("--verified-success", opts.verifiedSuccess ? "true" : "false");
+	}
 	if (opts.testPass != null) args.push("--test-pass", opts.testPass ? "true" : "false");
+	// tool_ok / success only when explicitly provided — soft tier, not gold
 	if (opts.toolOk != null) args.push("--tool-ok", opts.toolOk ? "true" : "false");
+	if (opts.success != null && opts.verifiedSuccess == null && opts.testPass == null) {
+		// legacy: map bare success to soft flag only (not verified)
+		args.push("--success", opts.success ? "true" : "false");
+	}
 
 	const r = await runCmd(Z0_PY, args, Z0_ROOT, 5000);
 	const closed = parseJson(r);
@@ -348,6 +440,11 @@ async function closeOpenTurn(opts: {
 			ok,
 			source: opts.source || "bridge_agent_end",
 			measured: opts.measured ?? null,
+			provider: opts.provider ?? null,
+			model: opts.model ?? null,
+			execution_completed: execDone,
+			verified_success: opts.verifiedSuccess ?? null,
+			outcome_tier: (closed.outcome_join as Jsonish | undefined)?.outcome_tier ?? null,
 			error: closed.error ?? (r.code !== 0 ? r.stderr.slice(0, 200) : null),
 		});
 	} catch {
@@ -355,15 +452,12 @@ async function closeOpenTurn(opts: {
 	}
 	if (ok) {
 		try {
-			// Clear open marker so the next turn owns last_open.
 			if (existsSync(LAST)) {
 				const cur = readLast();
 				if (cur && cur.trace_id === traceId) {
-					writeFileSync(LAST, ""); // emptied; next open overwrites
-					// prefer unlink via write empty then next writeLast
+					writeFileSync(LAST, "");
 				}
 			}
-			// overwrite with closed marker so readers don't re-close
 			writeLast({
 				schema: "z0int.open_turn.v1",
 				trace_id: traceId,
@@ -371,25 +465,30 @@ async function closeOpenTurn(opts: {
 				closed_ts: Date.now() / 1000,
 				measured: opts.measured ?? null,
 				source: opts.source || "bridge_agent_end",
+				provider: opts.provider ?? null,
+				model: opts.model ?? null,
 			});
 		} catch {
 			/* */
 		}
 	}
 
-	// Kerdoios observed economics (best-effort)
+	// Kerdoios observed economics (best-effort).
+	// Only mark completed when verified — bare turn_end is execution, not verified task.
 	try {
 		const cap =
 			(last && typeof last.capability_id === "string" && last.capability_id) ||
 			"coding.next_action";
+		const kProvider = opts.provider || "omp_bridge";
+		const kModel = opts.model || "unknown";
 		const kArgs = [
 			"-m",
 			"kerdoios",
 			"record",
 			"--provider",
-			opts.provider || "omp_bridge",
+			kProvider,
 			"--model",
-			opts.model || "session",
+			kModel,
 			"--task-type",
 			"coding",
 			"--capability-id",
@@ -397,7 +496,9 @@ async function closeOpenTurn(opts: {
 			"--cost",
 			"0",
 		];
-		if (opts.success !== false) kArgs.push("--completed");
+		const verified =
+			opts.verifiedSuccess === true || opts.testPass === true;
+		if (verified) kArgs.push("--completed");
 		if (opts.inputTokens != null) kArgs.push("--input-tokens", String(opts.inputTokens));
 		if (opts.outputTokens != null) kArgs.push("--output-tokens", String(opts.outputTokens));
 		await runCmd(KERD_PY, kArgs, KERD_ROOT, 5000);
@@ -424,9 +525,11 @@ async function closeFromMessages(messages: unknown[], source: string): Promise<J
 		measured: est.measured,
 		inputTokens: est.input_tokens,
 		outputTokens: est.output_tokens,
-		success: true,
-		toolOk: true,
+		executionCompleted: true,
+		// verified_success stays null until async join (CI/tests/user)
 		source,
+		provider: est.provider || undefined,
+		model: est.model || undefined,
 	});
 }
 
@@ -499,24 +602,35 @@ export default function z0intBridge(pi: ExtensionAPI) {
 			try {
 				const parts = String(args || "").trim().split(/\s+/).filter(Boolean);
 				let measured: number | undefined;
-				let success = true;
+				let verified = false;
 				for (let i = 0; i < parts.length; i++) {
 					if (parts[i] === "--measured" && parts[i + 1]) measured = Number(parts[++i]);
-					if (parts[i] === "--fail") success = false;
+					if (parts[i] === "--verified") verified = true;
 				}
 				const closed = await closeOpenTurn({
 					measured,
-					success,
-					testPass: success,
-					toolOk: success,
+					executionCompleted: true,
+					verifiedSuccess: verified ? true : undefined,
+					testPass: verified ? true : undefined,
 					source: "z0int-close-cmd",
 				});
+				let tier: unknown = null;
+				const oj = closed.outcome_join;
+				if (oj && typeof oj === "object" && "outcome_tier" in oj) {
+					tier = (oj as { outcome_tier?: unknown }).outcome_tier;
+				}
+				let trace: unknown = closed.trace_id;
+				const rec = closed.receipt;
+				if (!trace && rec && typeof rec === "object" && "trace_id" in rec) {
+					trace = (rec as { trace_id?: unknown }).trace_id;
+				}
 				ctx.ui.notify(
 					`z0int close: ${JSON.stringify({
 						ok: !closed.error,
-						trace: closed.trace_id || closed.receipt && (closed.receipt as Jsonish).trace_id,
+						trace,
 						saved: closed.actual_tokens_saved,
 						measured: closed.measured_frontier_tokens,
+						tier,
 					})}`,
 					closed.error ? "error" : "info",
 				);
