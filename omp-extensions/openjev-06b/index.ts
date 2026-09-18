@@ -1,9 +1,6 @@
 /**
- * OpenJev (z0int) typed decisions for OMP. Parallel to TypeSafe Jev and FlyForge.
- * Resident Python worker loads Qwen3.5-4B once. Fail-open. Does not replace judgmentProvider.
- *
- * Env: OPENJEV_PYTHON, OPENJEV_MODEL, OPENJEV_REVISION, OPENJEV_TIMEOUT_MS,
- * OPENJEV_MAX_TOKENS, CUDA_VISIBLE_DEVICES, HF_HOME.
+ * OpenJev 0.6B test lane (z0int). Same worker as 4B, smaller SLM for latency.
+ * Does not replace judgmentProvider or the 4B openjev_decide path.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync } from "node:fs";
@@ -16,10 +13,10 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 const here = dirname(fileURLToPath(import.meta.url));
 const workerPath = join(here, "worker.py");
 const PYTHON = process.env.OPENJEV_PYTHON || "/home/kvn/tmp/openjev/.venv/bin/python";
-const MODEL = process.env.OPENJEV_MODEL || "Qwen/Qwen3.5-4B";
-const REVISION = process.env.OPENJEV_REVISION || "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a";
-const TIMEOUT_MS = Number(process.env.OPENJEV_TIMEOUT_MS || "120000");
-const LOG = join(homedir(), ".omp/agent/extensions/openjev/route.log");
+const MODEL = "Qwen/Qwen3-0.6B";
+const REVISION = "c1899de289a04d12100db370d81485cdf75e47ca";
+const TIMEOUT_MS = Number(process.env.OPENJEV_06B_TIMEOUT_MS || "120000");
+const LOG = join(homedir(), ".omp/agent/extensions/openjev-06b/route.log");
 
 type Option = { id: string; description: string };
 type OpenJevResponse = {
@@ -133,16 +130,15 @@ function request(params: Record<string, unknown>, signal?: AbortSignal): Promise
 	return promise;
 }
 
-export default function openjevExtension(pi: ExtensionAPI) {
+export default function openjev06bExtension(pi: ExtensionAPI) {
 	const z = pi.zod;
-	pi.setLabel("OpenJev typed decisions (z0int)");
-	// Load on first openjev_decide / /openjev, not at plugin import.
+	pi.setLabel("OpenJev 0.6B test lane (z0int)");
 
 	pi.registerTool({
-		name: "openjev_decide",
-		label: "OpenJev Decide",
+		name: "openjev_decide_06b",
+		label: "OpenJev Decide 0.6B",
 		description:
-			"Typed option probabilities from local OpenJev (Qwen3.5-4B direct logits). Parallel to TypeSafe Jev. Fail-open if the SLM worker is down.",
+			"Faster OpenJev test lane: Qwen3-0.6B direct option logits. Same API as openjev_decide (4B). Fail-open. Do not load both SLMs at once on 12GB.",
 		parameters: z.object({
 			state: z.union([z.string(), z.record(z.string(), z.unknown()), z.array(z.unknown())]),
 			question: z.string(),
@@ -158,7 +154,7 @@ export default function openjevExtension(pi: ExtensionAPI) {
 			try {
 				const data = await request(
 					{
-						id: params.id || "omp",
+						id: params.id || "omp-06b",
 						state: params.state,
 						question: params.question,
 						options: params.options,
@@ -168,8 +164,8 @@ export default function openjevExtension(pi: ExtensionAPI) {
 				const ms = Date.now() - started;
 				log("decide", `${data.ok ? "ok" : "fail"} ${ms}ms`);
 				return {
-					content: [{ type: "text", text: JSON.stringify({ ...data, ms, backend: "openjev" }) }],
-					details: { ok: data.ok, ms, backend: "openjev" },
+					content: [{ type: "text", text: JSON.stringify({ ...data, ms, backend: "openjev-06b" }) }],
+					details: { ok: data.ok, ms, backend: "openjev-06b" },
 					isError: !data.ok,
 				};
 			} catch (error) {
@@ -180,7 +176,7 @@ export default function openjevExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: JSON.stringify({ ok: false, ms, backend: "openjev", error: message, fail_open: true }),
+							text: JSON.stringify({ ok: false, ms, backend: "openjev-06b", error: message, fail_open: true }),
 						},
 					],
 					details: { ok: false, ms, fail_open: true },
@@ -192,22 +188,22 @@ export default function openjevExtension(pi: ExtensionAPI) {
 	pi.on("before_agent_start", event => ({
 		systemPrompt: [
 			...event.systemPrompt,
-			"OpenJev is available via openjev_decide (local Qwen3.5-4B direct option logits). Parallel to TypeSafe Jev and FlyForge recovery_advise. Fail-open if the worker is down. Do not set /model to Jev or OpenJev.",
+			"OpenJev 0.6B test lane: openjev_decide_06b (Qwen3-0.6B). Faster/weaker than openjev_decide (4B). Do not load both workers on 12GB VRAM.",
 		],
 	}));
 
-	pi.registerCommand("openjev", {
-		description: "OpenJev worker status (local SLM, parallel to TypeSafe)",
+	pi.registerCommand("openjev06", {
+		description: "OpenJev 0.6B worker status",
 		async handler(_args, ctx) {
 			try {
 				const status = await request({ action: "status" });
 				if (!status.ok) {
-					ctx.ui.notify(status.error || "OpenJev worker not ready — fail-open", "warning");
+					ctx.ui.notify(status.error || "OpenJev 0.6B not ready — fail-open", "warning");
 					return;
 				}
-				ctx.ui.notify(`OpenJev ready: ${MODEL} @ ${REVISION.slice(0, 12)}`, "info");
+				ctx.ui.notify(`OpenJev 0.6B ready: ${MODEL} @ ${REVISION.slice(0, 12)}`, "info");
 			} catch (error) {
-				ctx.ui.notify(`OpenJev down: ${String(error)} — fail-open. TypeSafe Jev still runs.`, "warning");
+				ctx.ui.notify(`OpenJev 0.6B down: ${String(error)}`, "warning");
 			}
 		},
 	});
