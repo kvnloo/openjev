@@ -468,6 +468,53 @@ def build_parser() -> argparse.ArgumentParser:
     bee.add_argument("--input", required=True, help="Path to request JSON")
     bee.add_argument("--json", action="store_true", default=True)
 
+
+    art = sub.add_parser("artifacts", help="Candidate artifact inspect/import/list")
+    art_sub = art.add_subparsers(dest="artifacts_cmd", required=True)
+    arti = art_sub.add_parser("inspect", help="Validate manifest without installing")
+    arti.add_argument("manifest")
+    _json_flag(arti)
+    artim = art_sub.add_parser("import", help="Import candidate artifact (never promotes)")
+    artim.add_argument("manifest")
+    artim.add_argument("--force", action="store_true")
+    _json_flag(artim)
+    artl = art_sub.add_parser("list", help="List installed specialists")
+    _json_flag(artl)
+
+    ar = sub.add_parser("autoresearch", help="Verified Trajectory Superoptimizer")
+    ar_sub = ar.add_subparsers(dest="autoresearch_cmd", required=True)
+    for _ar_name, _ar_help in (
+        ("status", "Queue + resource governor status"),
+        ("pause", "Pause background jobs"),
+        ("resume", "Resume background jobs"),
+        ("run-once", "Claim and run one ABAB job if resources allow"),
+        ("daemon", "Run background loop (bounded iterations unless --forever)"),
+        ("report", "Recent replay results"),
+        ("enqueue", "Manually enqueue a verified trace"),
+    ):
+        _sp = ar_sub.add_parser(_ar_name, help=_ar_help)
+        _json_flag(_sp)
+        if _ar_name == "daemon":
+            _sp.add_argument("--max-iterations", type=int, default=10)
+            _sp.add_argument("--forever", action="store_true")
+            _sp.add_argument("--poll-seconds", type=float, default=5.0)
+        if _ar_name == "enqueue":
+            _sp.add_argument("--trace-id", required=True)
+            _sp.add_argument("--verifier-id", required=True)
+            _sp.add_argument("--verified-success", type=str, default="true")
+
+    kerd = sub.add_parser("kerdoios", help="Kerdoios projection helpers (receipts stay authoritative)")
+    kerd_sub = kerd.add_subparsers(dest="kerdoios_cmd", required=True)
+    kerde = kerd_sub.add_parser("export-observations", help="Export allocation_observation.v1 rows")
+    kerde.add_argument("--since", type=float, default=None)
+    kerde.add_argument("--output", default=None)
+    _json_flag(kerde)
+
+    pf = sub.add_parser("preflight", help="z0intelligence production preflight (no Evolution Lab)")
+    pf.add_argument("prompt")
+    pf.add_argument("--capability-id", default=None)
+    _json_flag(pf)
+
     for name, help_txt in (
         ("routine", "Compile/apply specialist region routines (→ z0int.routines)"),
         ("cascade", "Optimize specialist cascades for premium tokens (→ z0int.cascade)"),
@@ -738,6 +785,67 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_mine(args=args, as_json=as_json)
         if args.counterfactual_cmd == "summary":
             return cmd_summary(args=args, as_json=as_json)
+
+
+    if args.cmd == "artifacts":
+        from .artifacts import import_manifest, inspect_manifest, list_artifacts
+        if args.artifacts_cmd == "inspect":
+            out = inspect_manifest(args.manifest)
+            _print(out, as_json=as_json)
+            return 0 if out.get("ok") else 1
+        if args.artifacts_cmd == "import":
+            out = import_manifest(args.manifest, force=bool(getattr(args, "force", False)))
+            _print(out, as_json=as_json)
+            return 0 if out.get("ok") else 1
+        if args.artifacts_cmd == "list":
+            out = {"schema": "z0int.artifacts_list.v1", "artifacts": list_artifacts()}
+            _print(out, as_json=as_json)
+            return 0
+
+    if args.cmd == "autoresearch":
+        from .autoresearch import daemon as ar_daemon
+        from .autoresearch.queue import enqueue_trace
+        cmd = args.autoresearch_cmd
+        if cmd == "status":
+            _print(ar_daemon.status(), as_json=as_json)
+            return 0
+        if cmd == "pause":
+            _print(ar_daemon.pause(), as_json=as_json)
+            return 0
+        if cmd == "resume":
+            _print(ar_daemon.resume(), as_json=as_json)
+            return 0
+        if cmd == "run-once":
+            _print(ar_daemon.run_once(), as_json=as_json)
+            return 0
+        if cmd == "report":
+            _print(ar_daemon.report(), as_json=as_json)
+            return 0
+        if cmd == "daemon":
+            mi = None if getattr(args, "forever", False) else int(getattr(args, "max_iterations", 10))
+            _print(ar_daemon.run_daemon(poll_seconds=float(getattr(args, "poll_seconds", 5.0)), max_iterations=mi), as_json=as_json)
+            return 0
+        if cmd == "enqueue":
+            vs = str(getattr(args, "verified_success", "true")).lower() in ("1", "true", "yes", "y")
+            out = enqueue_trace(args.trace_id, verified_success=vs if vs else None, verifier_id=args.verifier_id)
+            # if user passed false, force not verified
+            if not vs:
+                out = enqueue_trace(args.trace_id, verified_success=False, verifier_id=args.verifier_id)
+            _print(out, as_json=as_json)
+            return 0 if out.get("ok") else 1
+
+    if args.cmd == "kerdoios":
+        from .kerdoios_export import export_observations
+        if args.kerdoios_cmd == "export-observations":
+            out = export_observations(since=getattr(args, "since", None), output=getattr(args, "output", None))
+            _print(out, as_json=as_json)
+            return 0
+
+    if args.cmd == "preflight":
+        from .preflight import preflight_dict
+        out = preflight_dict(args.prompt, capability_id=getattr(args, "capability_id", None))
+        _print(out, as_json=as_json)
+        return 0
 
     if args.cmd in ("routine", "cascade", "aodl", "repair", "abab"):
         rest = list(getattr(args, "module_argv", None) or [])
