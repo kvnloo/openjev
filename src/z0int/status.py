@@ -41,6 +41,7 @@ def run_status() -> dict[str, Any]:
         "kerdoios": kerd,
         "data": data,
         "onboard_steps": state.get("steps") or {},
+        "backends": (rep.discoveries or {}).get("backends") or [],
         "specialists": specialists,
         "z0int_home": str(paths.home()),
         "tokenomics": avoided,
@@ -85,6 +86,32 @@ def format_human(st: dict[str, Any]) -> str:
     lines.append(f"{'✓' if linked else '○'} OMP extensions: {', '.join(linked) or 'none'}")
     kerd = st.get("kerdoios") or {}
     lines.append(f"{'✓' if kerd.get('found') or kerd.get('importable') else '○'} Kerdoios (optional)")
+    lines.append("")
+    lines.append("Backends")
+    backends = st.get("backends") or []
+    if not backends:
+        lines.append("○ none registered")
+    elif isinstance(backends, dict) and backends.get("error"):
+        lines.append(f"○ backends error: {backends.get('error')}")
+    else:
+        for b in backends:
+            if not isinstance(b, dict):
+                continue
+            ready = b.get("ready")
+            loaded = b.get("loaded")
+            if ready and loaded:
+                mark = "✓"
+                state = "ready, loaded"
+            elif ready:
+                mark = "✓"
+                state = "installed, not loaded"
+            elif b.get("configured"):
+                mark = "○"
+                state = b.get("detail") or "configured, not ready"
+            else:
+                mark = "○"
+                state = b.get("detail") or "unavailable"
+            lines.append(f"{mark} {b.get('id') or '?'}: {state}")
     lines.append("")
     lines.append("Specialists")
     specs = st.get("specialists") or []

@@ -2,6 +2,9 @@
 
 Deterministic lifecycle. Agents should invoke these commands instead of
 reproducing setup steps from README memory.
+
+Future compiler stack (library modules still usable via python -m):
+  z0int routine|cascade|aodl|repair|abab …
 """
 
 from __future__ import annotations
@@ -268,7 +271,10 @@ def cmd_receipt_scrub(*, as_json: bool, dry_run: bool) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="z0int",
-        description="Personal intelligence lifecycle — onboard, doctor, status, models, receipt",
+        description=(
+            "Personal intelligence lifecycle — onboard, doctor, status, models, "
+            "receipt, routine/cascade/aodl/repair/abab"
+        ),
     )
     p.add_argument("--json", action="store_true", dest="as_json", help="Machine-readable JSON output")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -407,8 +413,269 @@ def build_parser() -> argparse.ArgumentParser:
     cfs = cf_sub.add_parser("summary", help="Replay grade / pair inventory")
     _json_flag(cfs)
 
+    # Future compiler stack — remainder args forwarded to module CLIs.
+
+
+    cx = sub.add_parser("context", help="Provenance-preserving context resolution")
+    cx_sub = cx.add_subparsers(dest="context_cmd", required=True)
+    cxr = cx_sub.add_parser("resolve", help="resolve_context — source-backed evidence packet")
+    cxr.add_argument("--json", action="store_true")
+    cxr.add_argument("--query", default=None, help="Natural-language information need")
+    cxr.add_argument("--path", action="append", default=[], help="Exact file path need (repeatable)")
+    cxr.add_argument("--task-id", default=None)
+    cxr.add_argument("--project-root", default=None)
+    cxr.add_argument("--no-qmd", action="store_true")
+    cxr.add_argument("--allow-memory", action="store_true")
+    cxr.add_argument("--input", default=None, help="JSON file with needs[]")
+
+
+    tk = sub.add_parser("task", help="Authorized verified-loop task family (worktree + checkpoint)")
+    tk_sub = tk.add_subparsers(dest="task_cmd", required=True)
+    tka = tk_sub.add_parser("authorize", help="Authorize coding.bounded_worktree_patch checkpoint")
+    tka.add_argument("--repo", required=True)
+    tka.add_argument("--path", required=True, help="relative file to patch")
+    tka.add_argument("--find", required=True)
+    tka.add_argument("--replace", required=True)
+    tka.add_argument("--req", action="append", default=[], help="requirement path (repeatable)")
+    tka.add_argument("--task-id", default=None)
+    tka.add_argument("--json", action="store_true")
+    tkr = tk_sub.add_parser("run", help="Advance authorized task until verified (or --until)")
+    tkr.add_argument("--task-id", required=True)
+    tkr.add_argument("--until", default="verified", choices=["resolved", "worktree_ready", "patched", "verified"])
+    tkr.add_argument("--allow-qmd", action="store_true")
+    tkr.add_argument("--json", action="store_true")
+    tks = tk_sub.add_parser("status", help="Show task checkpoint")
+    tks.add_argument("--task-id", default=None)
+    tks.add_argument("--json", action="store_true")
+    tkf = tk_sub.add_parser("fixture", help="Create reference fixture repo + authorize + run")
+    tkf.add_argument("--dir", required=True, help="directory for fixture git repo")
+    tkf.add_argument("--task-id", default=None)
+    tkf.add_argument("--json", action="store_true")
+
+    be = sub.add_parser("backends", help="DecisionBackend registry (list / doctor / eval)")
+    be_sub = be.add_subparsers(dest="backends_cmd", required=True)
+    bel = be_sub.add_parser("list", help="List registered backends (no model load)")
+    bel.add_argument("--json", action="store_true")
+    bed = be_sub.add_parser("doctor", help="Filesystem/config backend health (no load by default)")
+    bed.add_argument("--json", action="store_true")
+    bed.add_argument("--load", action="store_true", help="Explicitly load weights (GPU)")
+    bed.add_argument("--backend", default=None, help="Single backend id/alias")
+    bec = be_sub.add_parser("capabilities", help="Show capability metadata")
+    bec.add_argument("name", nargs="?", default="nanojev")
+    bec.add_argument("--json", action="store_true")
+    bee = be_sub.add_parser("eval", help="Run a DecisionRequest JSON through a backend")
+    bee.add_argument("--backend", default="nanojev")
+    bee.add_argument("--input", required=True, help="Path to request JSON")
+    bee.add_argument("--json", action="store_true", default=True)
+
+    for name, help_txt in (
+        ("routine", "Compile/apply specialist region routines (→ z0int.routines)"),
+        ("cascade", "Optimize specialist cascades for premium tokens (→ z0int.cascade)"),
+        ("aodl", "Bind routines/cascades into AODL strategy docs (→ z0int.aodl)"),
+        ("repair", "Counterexample-driven routine repair (→ z0int.refinement)"),
+        ("abab", "ABAB experiment archive helpers (→ z0int.abab)"),
+    ):
+        sp = sub.add_parser(name, help=help_txt)
+        sp.add_argument(
+            "module_argv",
+            nargs=argparse.REMAINDER,
+            help=f"Arguments for the {name} subcommand (see z0int {name} -h)",
+        )
 
     return p
+
+
+
+def _cmd_backends(args: argparse.Namespace) -> int:
+    """backends list|doctor|capabilities|eval — never import torch on list path."""
+    from z0int.backends.registry import (
+        backend_status,
+        create_backend,
+        get_backend_spec,
+        list_backend_specs,
+        register_builtin_backends,
+    )
+
+    cmd = args.backends_cmd
+    if cmd == "list":
+        register_builtin_backends()
+        rows = []
+        for spec in list_backend_specs():
+            # Cheap health: factory must not load GPU; health(load=False) is FS only.
+            try:
+                h = spec.factory().health(load=False)
+                rows.append(
+                    {
+                        "id": spec.id,
+                        "kind": spec.kind,
+                        "local": spec.local,
+                        "configured": h.configured,
+                        "ready": h.ready,
+                        "model": h.model,
+                        "detail": h.detail,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                rows.append(
+                    {
+                        "id": spec.id,
+                        "kind": spec.kind,
+                        "local": spec.local,
+                        "configured": False,
+                        "ready": False,
+                        "model": None,
+                        "detail": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+        payload = {"schema": "z0int.backends.v1", "backends": rows}
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print("id                 kind              ready  model")
+            for r in rows:
+                print(
+                    f"{r['id']:<18} {r['kind']:<16} "
+                    f"{'yes' if r['ready'] else 'no':<5} {r.get('model') or '-'}"
+                )
+                if r.get("detail"):
+                    print(f"  {r['detail']}")
+        return 0
+
+    if cmd == "doctor":
+        rows = backend_status(args.backend, load=bool(args.load))
+        payload = {
+            "schema": "z0int.backends.doctor.v1",
+            "load": bool(args.load),
+            "backends": rows,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, default=str))
+        else:
+            for r in rows:
+                mark = "✓" if r.get("ready") else "○"
+                print(f"{mark} {r['id']}: {r.get('detail')}")
+                if r.get("checkpoint"):
+                    print(f"  checkpoint: {r['checkpoint']}")
+        return 0
+
+    if cmd == "capabilities":
+        spec = get_backend_spec(args.name)
+        from dataclasses import asdict as _asdict
+
+        backend = spec.factory()
+        caps = _asdict(backend.capabilities)
+        payload = {"schema": "z0int.backends.capabilities.v1", "id": spec.id, "capabilities": caps}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            for k, v in caps.items():
+                print(f"{k}: {v}")
+        return 0
+
+    if cmd == "eval":
+        from pathlib import Path
+
+        from z0int.backends.base import request_from_mapping, result_to_dict
+
+        path = Path(args.input).expanduser()
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        request = request_from_mapping(raw)
+        backend = create_backend(args.backend)
+        result = backend.evaluate(request)
+        payload = result_to_dict(result)
+        print(json.dumps(payload, indent=2, default=str))
+        return 0
+
+    print(f"unknown backends command: {cmd}", file=sys.stderr)
+    return 2
+
+
+
+def _cmd_context(args: argparse.Namespace) -> int:
+    from z0int.context_resolve import (
+        InformationNeed,
+        needs_from_mapping,
+        resolve_context,
+    )
+
+    if args.context_cmd != "resolve":
+        print(f"unknown context command: {args.context_cmd}", file=sys.stderr)
+        return 2
+    needs = []
+    if args.input:
+        raw = json.loads(Path(args.input).expanduser().read_text(encoding="utf-8"))
+        needs.extend(needs_from_mapping(raw if isinstance(raw, dict) else {"needs": raw}))
+    for i, path in enumerate(getattr(args, "path", None) or []):
+        needs.append(InformationNeed(id=f"p{i}", description=path, kind="exact_path", path=path))
+    packet = resolve_context(
+        needs=needs or None,
+        query=getattr(args, "query", None),
+        task_id=getattr(args, "task_id", None),
+        project_root=getattr(args, "project_root", None),
+        allow_qmd=not bool(getattr(args, "no_qmd", False)),
+        allow_memory=bool(getattr(args, "allow_memory", False)),
+    )
+    payload = packet.to_dict()
+    if args.json or True:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return 0 if not packet.unresolved_gaps else 0  # gaps are data, not process failure
+
+
+
+def _cmd_task(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from z0int.task_loop import (
+        PatchSpec,
+        authorize_task,
+        list_checkpoints,
+        load_checkpoint,
+        make_fixture_repo,
+        resume_task,
+        run_until,
+        save_checkpoint,
+    )
+
+    def emit(obj: dict) -> None:
+        if getattr(args, "json", False) or True:
+            print(json.dumps(obj, indent=2, ensure_ascii=False, default=str))
+
+    cmd = args.task_cmd
+    if cmd == "status":
+        if args.task_id:
+            cp = load_checkpoint(args.task_id)
+            emit(cp.to_dict())
+        else:
+            emit({"tasks": list_checkpoints()})
+        return 0
+    if cmd == "authorize":
+        cp = authorize_task(
+            base_repo=args.repo,
+            patch=PatchSpec(relative_path=args.path, find=args.find, replace=args.replace),
+            requirement_paths=list(args.req or []),
+            task_id=args.task_id,
+        )
+        emit(cp.to_dict())
+        return 0
+    if cmd == "run":
+        cp = resume_task(args.task_id, until=args.until, allow_qmd=bool(getattr(args, "allow_qmd", False)))
+        emit(cp.to_dict())
+        # exit 0 always for data; verified flag is in payload
+        return 0 if cp.verified_success is not False or cp.status != "failed" else 1
+    if cmd == "fixture":
+        root, patch = make_fixture_repo(Path(args.dir))
+        cp = authorize_task(
+            base_repo=root,
+            patch=patch,
+            requirement_paths=["REQUIREMENT.md", "app.py"],
+            task_id=args.task_id,
+        )
+        cp = run_until(cp, until="verified", allow_qmd=False)
+        emit(cp.to_dict())
+        return 0 if cp.verified_success else 1
+    print(f"unknown task command: {cmd}", file=sys.stderr)
+    return 2
+
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -421,6 +688,13 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_doctor(as_json=as_json)
     if args.cmd == "status":
         return cmd_status(as_json=as_json)
+    if args.cmd == "context":
+        return _cmd_context(args)
+    if args.cmd == "task":
+        return _cmd_task(args)
+    if args.cmd == "backends":
+        return _cmd_backends(args)
+
     if args.cmd == "onboard":
         return cmd_onboard(
             auto=bool(getattr(args, "auto", True)),
@@ -464,6 +738,27 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_mine(args=args, as_json=as_json)
         if args.counterfactual_cmd == "summary":
             return cmd_summary(args=args, as_json=as_json)
+
+    if args.cmd in ("routine", "cascade", "aodl", "repair", "abab"):
+        rest = list(getattr(args, "module_argv", None) or [])
+        # argparse REMAINDER keeps a leading "--" when users write: z0int routine -- compile ...
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        # bare `z0int routine` / `z0int routine -h` → module help
+        if not rest or rest in (["-h"], ["--help"]):
+            rest = ["--help"]
+        if args.cmd == "routine":
+            from .routines import _main as _mod_main
+        elif args.cmd == "cascade":
+            from .cascade import _main as _mod_main
+        elif args.cmd == "aodl":
+            from .aodl import _main as _mod_main
+        elif args.cmd == "repair":
+            from .refinement import main as _mod_main
+        else:
+            from .abab import _main as _mod_main
+        return int(_mod_main(rest))
+
     parser.error(f"unknown command: {args.cmd}")
     return 2
 

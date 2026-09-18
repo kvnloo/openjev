@@ -147,6 +147,12 @@ def plan_models(*, manifest: dict[str, Any] | None = None, vram_gb: float | None
                 "type": (models[mid] or {}).get("type", "hf"),
                 "roles": (models[mid] or {}).get("roles") or [],
                 "min_vram_gb": (models[mid] or {}).get("min_vram_gb"),
+                "local_dir": (
+                    str(managed_model_dir(mid))
+                    if (models[mid] or {}).get("type") == "hf_bundle"
+                    else None
+                ),
+                "present": model_present(mid, models[mid] or {}),
             }
             for mid in models
         },
@@ -187,6 +193,50 @@ def model_cached(hf_id: str, revision: str | None = None) -> bool:
     return (root / "snapshots" / revision).is_dir()
 
 
+
+
+def managed_model_dir(model_id: str) -> Path:
+    """Canonical managed bundle path under ~/.z0int/models/<id>/."""
+    from . import paths
+
+    return paths.home() / "models" / model_id
+
+
+def bundle_complete(model_id: str, meta: dict[str, Any] | None = None) -> bool:
+    """True when a managed hf_bundle has the required NanoJev-style layout."""
+    meta = meta or {}
+    root = managed_model_dir(model_id)
+    # Prefer NanoJev validator when available; fall back to allow_patterns files.
+    try:
+        from z0int.backends.nanojev_runtime import validate_checkpoint_dir
+
+        return root.is_dir() and not validate_checkpoint_dir(root)
+    except Exception:
+        patterns = meta.get("allow_patterns") or []
+        if not root.is_dir() or not patterns:
+            return False
+        for pat in patterns:
+            if pat.endswith("/*"):
+                if not (root / pat[:-2]).is_dir():
+                    return False
+            elif not (root / pat).is_file():
+                return False
+        return True
+
+
+def model_present(model_id: str, meta: dict[str, Any]) -> bool:
+    """Whether weights appear available for plan/sync status."""
+    mtype = meta.get("type") or "hf"
+    if mtype == "generated":
+        return True
+    if mtype == "hf_bundle":
+        return bundle_complete(model_id, meta)
+    hf = meta.get("hf")
+    rev = meta.get("revision")
+    if not hf:
+        return False
+    return model_cached(str(hf), str(rev) if rev else None)
+
 def sync_models(
     *,
     plan: dict[str, Any] | None = None,
@@ -211,13 +261,73 @@ def sync_models(
     results: list[dict[str, Any]] = []
     for mid in ordered:
         meta = models.get(mid) or {}
-        if meta.get("type") == "generated":
+        mtype = meta.get("type") or "hf"
+        if mtype == "generated":
             results.append({"id": mid, "status": "skip_generated"})
             continue
         hf = meta.get("hf")
         rev = meta.get("revision")
         if not hf or not rev:
             results.append({"id": mid, "status": "missing_pin"})
+            continue
+        if mtype == "hf_bundle":
+            local_dir = managed_model_dir(mid)
+            if bundle_complete(mid, meta):
+                results.append(
+                    {
+                        "id": mid,
+                        "status": "cached",
+                        "hf": hf,
+                        "revision": rev,
+                        "path": str(local_dir),
+                        "type": mtype,
+                    }
+                )
+                continue
+            if dry_run:
+                results.append(
+                    {
+                        "id": mid,
+                        "status": "would_download",
+                        "hf": hf,
+                        "revision": rev,
+                        "path": str(local_dir),
+                        "type": mtype,
+                        "allow_patterns": list(meta.get("allow_patterns") or []),
+                    }
+                )
+                continue
+            try:
+                from huggingface_hub import snapshot_download
+
+                local_dir.mkdir(parents=True, exist_ok=True)
+                path = snapshot_download(
+                    repo_id=str(hf),
+                    revision=str(rev),
+                    local_dir=str(local_dir),
+                    allow_patterns=(list(meta.get("allow_patterns")) if meta.get("allow_patterns") else None),
+                )
+                results.append(
+                    {
+                        "id": mid,
+                        "status": "downloaded",
+                        "hf": hf,
+                        "revision": rev,
+                        "path": str(path),
+                        "type": mtype,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                results.append(
+                    {
+                        "id": mid,
+                        "status": "error",
+                        "hf": hf,
+                        "revision": rev,
+                        "error": str(exc),
+                        "type": mtype,
+                    }
+                )
             continue
         if model_cached(str(hf), str(rev)):
             results.append({"id": mid, "status": "cached", "hf": hf, "revision": rev})

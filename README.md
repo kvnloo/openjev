@@ -1,5 +1,8 @@
 # z0int
 
+> **Name:** product identity is **z0intelligence** — a play on stochastic parrots and useful abundance under finite frontier budgets (with Kerdoios). See `docs/brand.md`. Package/CLI stay `z0int` until an explicit rename cutover.
+
+
 **Personal intelligence that learns how you work, so your frontier models do less.**
 
 z0int is evolving from an open Jev-style decision runtime into a private, personalized intelligence layer for agentic systems.
@@ -9,6 +12,17 @@ The long-term goal is not to train one giant model on a person's life. It is to 
 Today, this repository contains the OpenJev runtime and benchmark substrate: typed probabilistic decisions, direct logit readout, trainable scorers, shared-state reuse, and integration with [Evolution Lab](https://github.com/kvnloo/evolution-lab). The personalization and onboarding system described below is the roadmap, not a claim that all of it is implemented today.
 
 See [ROADMAP.md](ROADMAP.md) for the staged build.
+
+
+## Decision backends
+
+```bash
+z0int onboard --auto --sync-models
+z0int backends list
+z0int backends eval --backend nanojev --input tests/fixtures/nanojev_request.json --json
+```
+
+See `docs/backends.md`. NanoJev is a local DecisionBackend; existing OpenJev/vLLM/MB lanes are unchanged.
 
 ## Why
 
@@ -333,3 +347,31 @@ Details: [docs/vllm-diffusion-route.md](docs/vllm-diffusion-route.md).
 - [Memento](https://github.com/kvnloo/Memento) - prospective private computer-use history source
 
 This repository is an independent research project. Upstream components retain their licenses. Project code is released under the [MIT License](LICENSE).
+
+## Future compiler stack (integrated)
+
+Implemented in-tree (library + `z0int` CLI delegates). **Not product-validated on live Astra/Grok traffic.**
+
+| Command | Module | Role |
+|---|---|---|
+| `z0int routine …` | `z0int.routines` | Compile stable specialist regions into routines |
+| `z0int cascade …` | `z0int.cascade` | Premium-token cascades over specialists |
+| `z0int aodl …` | `z0int.aodl` | Bind routine/cascade into AODL strategy (`plan`, not intent) |
+| `z0int repair …` | `z0int.refinement` | Counterexample-driven routine repair |
+| `z0int abab …` | `z0int.abab` | Experiment archive / next / stop helpers |
+
+Docs: `docs/routine-compiler.md`, `docs/cascade-compiler.md`, `docs/aodl-integration.md`, `docs/abab-loop.md`, `docs/routine-repair.md`, `AODL_COMPAT.md`.
+
+### Measured (synthetic / unit only)
+
+- Future-feature unit suite: 73 tests.
+- Synthetic repair demo: 384/384 toy labels correct; fallback callbacks 384 → 192 after repaired-child activation; rollback returns 384. **No real LLM token savings.**
+
+### Not yet measured
+
+- Real frontier token savings from routines/cascades
+- Real Blender / harness L3 replacement
+- Energy / joule savings
+
+Token accounting stays on the existing **receipt** spine (`z0int receipt …`). Kerdoios still owns *where* residual model work runs; z0int owns *whether* cognition can stop earlier.
+

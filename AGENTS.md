@@ -32,3 +32,38 @@ This repo follows the [Verified OSS Loop](https://github.com/kvnloo/verified-oss
 - Preserve exact model and source revisions. Fetch third-party evaluation records only through `benchmarks/fetch_sources.py`; do not commit model weights, caches, or third-party raw records.
 - Personalized state lives under **`~/.z0int/`** only (episodes, specialists, stream, research). Never default champions into the git tree.
 - `webgpu-demo/` is static and has no build step. Preserve `_headers`, runtime version pins, browser-only inference, and the explicit probability limitations.
+
+## Decision backends
+
+- Contract: `src/z0int/backends/` (`DecisionBackend`, not Provider).
+- First local semantic engine: NanoJev (`nanojev` / model id `nanojev_06b`).
+- Agent commands:
+  - `z0int backends list --json`
+  - `z0int backends doctor --json`
+  - `z0int backends eval --backend nanojev --input tests/fixtures/nanojev_request.json --json`
+- Do not load NanoJev from ordinary doctor/status list paths.
+- Do not mark backend inference as `verified_success`; ambient turn close ≠ gold.
+
+## Brand (background)
+
+Product name **z0intelligence** (stochastic-parrot play; abundance under finite frontier budgets with Kerdoios). Details: `docs/brand.md`. Do not mass-rename the `z0int` package in drive-by PRs.
+
+## Context resolve (critical path)
+
+- `z0int context resolve --query '…' --json` or `--path file`
+- Primitive: `z0int.context_resolve.resolve_context` — provenance packet, not authorization.
+- Do not flip z0int-bridge `log_only` live without host consumption + verifier.
+- See `docs/critical-path-phase0.md`.
+
+## Verified task loop
+
+- Family `coding.bounded_worktree_patch`: `z0int task fixture|authorize|run|status`
+- Checkpoints: `$Z0INT_HOME/state/tasks/<id>.json` (default `~/.z0int`)
+- `execution_completed` ≠ `verified_success`
+
+## Bridge hot-reload (v2)
+
+- Shim: `omp-extensions/z0int-bridge/index.ts` (immutable after session start)
+- Worker: `python -u -m z0int.bridge.worker`
+- Docs: `docs/bridge-hot-reload.md`
+- After first install: **one OMP restart**, then `/reload-plugins` hot-swaps Python.

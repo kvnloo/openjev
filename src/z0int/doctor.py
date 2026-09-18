@@ -311,6 +311,44 @@ def run_doctor() -> DoctorReport:
         ),
     )
 
+
+    # Decision backends (filesystem only — never load GPU weights here)
+    try:
+        from z0int.backends.registry import backend_status
+
+        be_rows = backend_status(load=False)
+        report.discoveries["backends"] = be_rows
+        for row in be_rows:
+            _add(
+                report,
+                Check(
+                    id=f"backend.{row['id']}",
+                    ok=True,  # optional — missing weights is not a doctor failure
+                    detail=(
+                        f"configured={row.get('configured')} ready={row.get('ready')} "
+                        f"loaded={row.get('loaded')} model={row.get('model')} "
+                        f"checkpoint={row.get('checkpoint')} | {row.get('detail')}"
+                    ),
+                    required=False,
+                    fix=(
+                        None
+                        if row.get("ready")
+                        else "z0int models sync  # downloads pinned NanoJev bundle when requested"
+                    ),
+                ),
+            )
+    except Exception as exc:  # noqa: BLE001
+        report.discoveries["backends"] = {"error": str(exc)}
+        _add(
+            report,
+            Check(
+                id="backends",
+                ok=True,
+                detail=f"backends unavailable: {type(exc).__name__}: {exc}",
+                required=False,
+            ),
+        )
+
     # privacy: ensure repo has no personal champion path committed expectation
     bad = _repo_root() / "data" / "next_action" / "champion.npz"
     _add(
