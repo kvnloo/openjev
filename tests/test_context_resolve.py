@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from z0int.context_resolve import (
+    InformationNeed,
+    project_to_aodl_fields,
+    resolve_context,
+)
+
+
+class ContextResolveTests(unittest.TestCase):
+    def test_exact_path_hit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            f = root / "req.md"
+            f.write_text("# requirement\nmust verify independently\n", encoding="utf-8")
+            packet = resolve_context(
+                needs=[InformationNeed(id="r1", description="req", kind="exact_path", path="req.md")],
+                project_root=root,
+                allow_qmd=False,
+                use_cache=False,
+            )
+            self.assertEqual(len(packet.evidence), 1)
+            self.assertEqual(packet.evidence[0].trust_class, "project_constraint")
+            self.assertFalse(packet.unresolved_gaps)
+            self.assertFalse(packet.measurements["gpu_loaded"])
+            self.assertEqual(packet.measurements["network_model_calls"], 0)
+            proj = project_to_aodl_fields(packet)
+            self.assertIn("provenance", proj)
+            self.assertIn("evidence", proj)
+            self.assertNotIn("intentContract", proj)
+
+    def test_missing_path_is_gap_not_invention(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            packet = resolve_context(
+                needs=[
+                    InformationNeed(
+                        id="r1",
+                        description="missing",
+                        kind="exact_path",
+                        path="nope.md",
+                        required=True,
+                    )
+                ],
+                project_root=tmp,
+                allow_qmd=False,
+                use_cache=False,
+            )
+            self.assertEqual(packet.evidence, [])
+            self.assertTrue(any("missing path" in g for g in packet.unresolved_gaps))
+
+    def test_empty_query_rejected(self):
+        with self.assertRaises(ValueError):
+            resolve_context(needs=[], allow_qmd=False, use_cache=False)
+
+    def test_memory_off_by_default(self):
+        packet = resolve_context(
+            needs=[InformationNeed(id="m1", description="prefs", kind="memory")],
+            allow_qmd=False,
+            allow_memory=False,
+            use_cache=False,
+        )
+        self.assertTrue(any("memory recall disabled" in g for g in packet.unresolved_gaps))
+
+    def test_recipe_cache_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict("os.environ", {"Z0INT_HOME": tmp}):
+                from z0int import paths as paths_mod
+                from z0int.context_resolve import load_recipe_cache
+
+                # re-import home
+                f = Path(tmp) / "models"
+                f.mkdir(parents=True)
+                root = Path(tmp) / "proj"
+                root.mkdir()
+                (root / "a.py").write_text("x=1\n", encoding="utf-8")
+                p1 = resolve_context(
+                    needs=[InformationNeed(id="e", description="a", kind="exact_path", path="a.py")],
+                    project_root=root,
+                    allow_qmd=False,
+                    use_cache=True,
+                )
+                cached = load_recipe_cache(p1.recipe.request_signature)
+                self.assertIsNotNone(cached)
+                self.assertEqual(cached["recipe"]["capability_id"], "context_resolve")
+
+
+if __name__ == "__main__":
+    unittest.main()

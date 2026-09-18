@@ -47,3 +47,10 @@ This repo follows the [Verified OSS Loop](https://github.com/kvnloo/verified-oss
 ## Brand (background)
 
 Product name **z0intelligence** (stochastic-parrot play; abundance under finite frontier budgets with Kerdoios). Details: `docs/brand.md`. Do not mass-rename the `z0int` package in drive-by PRs.
+
+## Context resolve (critical path)
+
+- `z0int context resolve --query '…' --json` or `--path file`
+- Primitive: `z0int.context_resolve.resolve_context` — provenance packet, not authorization.
+- Do not flip z0int-bridge `log_only` live without host consumption + verifier.
+- See `docs/critical-path-phase0.md`.

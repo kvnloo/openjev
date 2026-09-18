@@ -415,6 +415,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Future compiler stack — remainder args forwarded to module CLIs.
 
+
+    cx = sub.add_parser("context", help="Provenance-preserving context resolution")
+    cx_sub = cx.add_subparsers(dest="context_cmd", required=True)
+    cxr = cx_sub.add_parser("resolve", help="resolve_context — source-backed evidence packet")
+    cxr.add_argument("--json", action="store_true")
+    cxr.add_argument("--query", default=None, help="Natural-language information need")
+    cxr.add_argument("--path", action="append", default=[], help="Exact file path need (repeatable)")
+    cxr.add_argument("--task-id", default=None)
+    cxr.add_argument("--project-root", default=None)
+    cxr.add_argument("--no-qmd", action="store_true")
+    cxr.add_argument("--allow-memory", action="store_true")
+    cxr.add_argument("--input", default=None, help="JSON file with needs[]")
+
     be = sub.add_parser("backends", help="DecisionBackend registry (list / doctor / eval)")
     be_sub = be.add_subparsers(dest="backends_cmd", required=True)
     bel = be_sub.add_parser("list", help="List registered backends (no model load)")
@@ -554,6 +567,37 @@ def _cmd_backends(args: argparse.Namespace) -> int:
 
 
 
+def _cmd_context(args: argparse.Namespace) -> int:
+    from z0int.context_resolve import (
+        InformationNeed,
+        needs_from_mapping,
+        resolve_context,
+    )
+
+    if args.context_cmd != "resolve":
+        print(f"unknown context command: {args.context_cmd}", file=sys.stderr)
+        return 2
+    needs = []
+    if args.input:
+        raw = json.loads(Path(args.input).expanduser().read_text(encoding="utf-8"))
+        needs.extend(needs_from_mapping(raw if isinstance(raw, dict) else {"needs": raw}))
+    for i, path in enumerate(getattr(args, "path", None) or []):
+        needs.append(InformationNeed(id=f"p{i}", description=path, kind="exact_path", path=path))
+    packet = resolve_context(
+        needs=needs or None,
+        query=getattr(args, "query", None),
+        task_id=getattr(args, "task_id", None),
+        project_root=getattr(args, "project_root", None),
+        allow_qmd=not bool(getattr(args, "no_qmd", False)),
+        allow_memory=bool(getattr(args, "allow_memory", False)),
+    )
+    payload = packet.to_dict()
+    if args.json or True:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return 0 if not packet.unresolved_gaps else 0  # gaps are data, not process failure
+
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
@@ -564,6 +608,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_doctor(as_json=as_json)
     if args.cmd == "status":
         return cmd_status(as_json=as_json)
+    if args.cmd == "context":
+        return _cmd_context(args)
     if args.cmd == "backends":
         return _cmd_backends(args)
 
