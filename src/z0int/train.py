@@ -60,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="z0int-train-next-action")
     p.add_argument("--episodes", type=Path, default=DEFAULT_OUT / "next_action.jsonl")
     p.add_argument("--confirm-frac", type=float, default=0.2)
+    p.add_argument("--mb", action="store_true", help="also train mushroom-body local_plasticity")
+    p.add_argument("--n-kc", type=int, default=96)
     args = p.parse_args(argv)
     X, y = load_xy(args.episodes)
     n = len(y)
@@ -75,9 +77,22 @@ def main(argv: list[str] | None = None) -> int:
         "n_confirm": int(len(ycf)),
         "majority_confirm": float((ycf == maj).mean()),
         "ridge_confirm": float((pred == ycf).mean()),
+        "ridge_n_params": int(W.size),
         "label_counts": {FAMILIES[i]: int((y == i).sum()) for i in range(len(FAMILIES))},
-        "note": "Time-split ridge vs majority. Fly/MB comparison is Evolution Lab next, not this report.",
+        "note": "Time-split; same features. MB uses Evolution Lab local_plasticity (KC→MBON).",
     }
+    if args.mb:
+        import sys
+        from pathlib import Path as P
+
+        sys.path.insert(0, str(P("/workspace/evolution-lab")))
+        from evolution_lab.jev_distill import fit_fly, predict_fly
+
+        fly = fit_fly(Xtr, ytr, len(FAMILIES), n_kc=args.n_kc, seed=1)
+        pred_f = predict_fly(Xcf, fly)
+        report["mb_confirm"] = float((pred_f == ycf).mean())
+        report["mb_n_params"] = int(fly["n_params"])
+        report["mb_n_kc"] = int(args.n_kc)
     print(json.dumps(report, indent=2))
     dest = args.episodes.parent / "next_action_report.json"
     dest.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
