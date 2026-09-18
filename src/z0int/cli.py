@@ -429,6 +429,19 @@ def build_parser() -> argparse.ArgumentParser:
     cxr.add_argument("--input", default=None, help="JSON file with needs[]")
 
 
+    osc = sub.add_parser(
+        "os-context",
+        help="Import workspace-copilot Flow episodes (os.next_context.v0) into z0int vault",
+    )
+    osc_sub = osc.add_subparsers(dest="os_context_cmd", required=True)
+    osc_imp = osc_sub.add_parser("import", help="Pull closed episodes + shadow preds into ~/.z0int/episodes")
+    osc_imp.add_argument("--limit", type=int, default=50000)
+    osc_imp.add_argument("--db", default=None, help="override workspace-copilot db path")
+    _json_flag(osc_imp)
+    osc_st = osc_sub.add_parser("stats", help="Live/imported os.next_context metrics")
+    _json_flag(osc_st)
+
+
     tk = sub.add_parser("task", help="Authorized verified-loop task family (worktree + checkpoint)")
     tk_sub = tk.add_subparsers(dest="task_cmd", required=True)
     tka = tk_sub.add_parser("authorize", help="Authorize coding.bounded_worktree_patch checkpoint")
@@ -840,6 +853,23 @@ def main(argv: list[str] | None = None) -> int:
             out = export_observations(since=getattr(args, "since", None), output=getattr(args, "output", None))
             _print(out, as_json=as_json)
             return 0
+
+
+    if args.cmd == "os-context":
+        from . import os_context
+
+        if args.os_context_cmd == "import":
+            db = Path(args.db).expanduser() if getattr(args, "db", None) else None
+            if db is not None:
+                out = os_context.import_from_db(db_path=db, limit=int(getattr(args, "limit", 50000) or 50000))
+            else:
+                out = os_context.import_via_cli()
+            _print(out, as_json=as_json)
+            return 0 if out.get("ok") else 1
+        if args.os_context_cmd == "stats":
+            out = os_context.stats()
+            _print(out, as_json=as_json)
+            return 0 if out.get("ok", True) else 1
 
     if args.cmd == "preflight":
         from .preflight import preflight_dict
