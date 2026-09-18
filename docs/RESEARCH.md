@@ -1370,24 +1370,29 @@ NOW / DONE (2026-09-17 → data-engine pivot)
      - flyforge-jev OMP extension: log-only multi-session writer
      - `evolution_lab.live_stream` + `pn_features` structured-cue scaffold
 
-NEXT (capability cartography — not more next-action thrash)
+NEXT (capability cartography + residual allocation)
   11. DONE offline 2×2 rich PN → gen-1 (DEV metrics); gen-0 backup kept
-  12. DONE Capability Miner (`evolution_lab capability-mine`):
-      - session-sealed split (train/dev/sealed); confirm row-split = DEV only
-      - CapabilityCard / BenchmarkSpec / CapabilityResult schemas
-      - atlas + cards + specs + top3 + gaps under ~/.z0int/research/
-      - SEALED L0: when MB predicts DELEGATE, precision≈0.982 n_pred≈3053
-      - SEALED multiclass MB≈0.55 vs ridge≈0.12 (majority inflated by DEL skew)
-  13. TOP3 specialists to benchmark next (not global acc):
-      a. delegate_gating (typed yes/no; L0 sharp; need L2 wall-clock/outcome)
-      b. recovery_action (existing P0 gym; high label quality)
-      c. needs_verification (after EDIT; high failure cost; need test joins)
-  14. outcome joins → L2/L3; live stream fill; teacher cascade on high-info only
-  15. ABAB at TASK×DATA×MODEL×POLICY level; Capability Atlas is the fitness surface
+  12. DONE Capability Miner (`evolution_lab capability-mine`)
+  13. DONE hard boundary:
+        z0int = cognition filter (what does NOT need frontier LLM)
+        Kerdoios = residual allocator (where remaining cognition runs)
+        Do NOT merge; Kerdoios NEVER executes flies; returns ExecutionPlan only
+  14. DONE bridge slices:
+        a. Kerdoios Observation: capability_id + input/output/cached/context tokens + latency
+           aggregate lookup: (model, capability) → family → global
+        b. WorkRequirement.capability_id
+        c. z0int `preflight` CLI/API → route local|model + residual WorkRequirement
+        d. OMP `z0int-bridge` extension (log-only): preflight → kerdoios plan → receipt
+  15. TOP3 specialists (still L0 until outcome joins):
+      delegate_gating / recovery_action / needs_verification
+  16. Measure north-star: frontier tokens per verified task (Astra tokens/Blender milestone)
+      counterfactual ledger: avoided vs baseline context
+  17. ABAB on token consumption strategy; context typed evidence packs (not weak prose)
 
 LATER
-  16. Memento / FlyGym / MaleCNS / 5B — only if atlas says remaining niches need them
-
+  18. Promote preflight from log-only → host route gate (after measured non-inferior success)
+  19. Premium quota reserve policy for Astra; free-quota consume for Groq/Cerebras
+  20. Memento / FlyGym / MaleCNS / 5B — only if atlas niches demand them
 
 ```
 
