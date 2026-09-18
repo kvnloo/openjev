@@ -171,6 +171,48 @@ def cmd_receipt_join(*, args: argparse.Namespace) -> int:
     return 0 if joined else 1
 
 
+
+def cmd_receipt_close(*, args: argparse.Namespace) -> int:
+    from .receipt import Outcome, close_turn
+
+    def flag(name: str) -> bool | None:
+        v = getattr(args, name, None)
+        return v if v is not None else None
+
+    oc = None
+    if any(flag(n) is not None for n in (
+        "verified","success","tool_ok","test_pass","task_done",
+        "user_correction","reverted","verifier_ok","ci_failed","pr_merged",
+    )) or args.note:
+        oc = Outcome(
+            verified=flag("verified"),
+            success=flag("success"),
+            tool_ok=flag("tool_ok"),
+            test_pass=flag("test_pass"),
+            task_done=flag("task_done"),
+            user_correction=flag("user_correction"),
+            reverted=flag("reverted"),
+            verifier_ok=flag("verifier_ok"),
+            ci_failed=flag("ci_failed"),
+            pr_merged=flag("pr_merged"),
+            note=args.note,
+            source=args.source or "cli",
+        )
+    closed = close_turn(
+        args.trace_id,
+        measured_frontier_tokens=args.measured,
+        input_tokens=args.input_tokens,
+        output_tokens=args.output_tokens,
+        cached_input_tokens=args.cached_input_tokens,
+        latency_ms=args.latency_ms,
+        provider=args.provider,
+        model=args.model,
+        outcome=oc,
+        source=args.source or "cli",
+    )
+    print(json.dumps(closed, indent=2, default=str))
+    return 0
+
 def cmd_receipt_summary(*, as_json: bool) -> int:
     from .receipt import summarize_tokenomics
 
@@ -265,6 +307,33 @@ def build_parser() -> argparse.ArgumentParser:
     rj.add_argument("--note", default=None)
     rj.add_argument("--source", default="cli")
 
+
+    rcl = rc_sub.add_parser("close", help="Post-turn: measured tokens + optional outcome join")
+    _json_flag(rcl)
+    rcl.add_argument("trace_id")
+    rcl.add_argument("--measured", type=int, default=None, help="measured frontier tokens total")
+    rcl.add_argument("--input-tokens", dest="input_tokens", type=int, default=None)
+    rcl.add_argument("--output-tokens", dest="output_tokens", type=int, default=None)
+    rcl.add_argument("--cached-input-tokens", dest="cached_input_tokens", type=int, default=None)
+    rcl.add_argument("--latency-ms", dest="latency_ms", type=float, default=None)
+    rcl.add_argument("--provider", default=None)
+    rcl.add_argument("--model", default=None)
+    for name, dest in (
+        ("--success", "success"),
+        ("--verified", "verified"),
+        ("--tool-ok", "tool_ok"),
+        ("--test-pass", "test_pass"),
+        ("--task-done", "task_done"),
+        ("--user-correction", "user_correction"),
+        ("--reverted", "reverted"),
+        ("--verifier-ok", "verifier_ok"),
+        ("--ci-failed", "ci_failed"),
+        ("--pr-merged", "pr_merged"),
+    ):
+        rcl.add_argument(name, dest=dest, type=_bool_opt, default=None)
+    rcl.add_argument("--note", default=None)
+    rcl.add_argument("--source", default="cli")
+
     rs = rc_sub.add_parser("summary", help="Tokenomics rollup from receipts + bridge")
     _json_flag(rs)
 
@@ -307,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_receipt_emit(args=args)
         if args.receipt_cmd == "join":
             return cmd_receipt_join(args=args)
+        if args.receipt_cmd == "close":
+            return cmd_receipt_close(args=args)
         if args.receipt_cmd == "summary":
             return cmd_receipt_summary(as_json=as_json)
     parser.error(f"unknown command: {args.cmd}")

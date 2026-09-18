@@ -287,6 +287,80 @@ def join_outcome(
     return joined
 
 
+
+def close_turn(
+    trace_id: str,
+    *,
+    measured_frontier_tokens: int | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cached_input_tokens: int | None = None,
+    latency_ms: float | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    outcome: Outcome | dict[str, Any] | None = None,
+    root: Path | None = None,
+    source: str = "close_turn",
+) -> dict[str, Any]:
+    """Post-turn close: write measured tokens, optional outcome join, economics fields.
+
+    Append-only: emits an updated receipt row. When baseline+measured both exist,
+    ``actual_tokens_saved`` is computed on the closed row for immediate proof.
+    """
+    base = find_receipt(trace_id, root=root) or {"trace_id": trace_id, "schema": SCHEMA}
+    closed = dict(base)
+    # unwrap nested bridge receipt fields already merged by find_receipt
+    if measured_frontier_tokens is not None:
+        closed["measured_frontier_tokens"] = int(measured_frontier_tokens)
+    elif input_tokens is not None or output_tokens is not None:
+        closed["measured_frontier_tokens"] = int(input_tokens or 0) + int(output_tokens or 0)
+    if input_tokens is not None:
+        closed["input_tokens"] = int(input_tokens)
+    if output_tokens is not None:
+        closed["output_tokens"] = int(output_tokens)
+    if cached_input_tokens is not None:
+        closed["cached_input_tokens"] = int(cached_input_tokens)
+    if latency_ms is not None:
+        closed["latency_ms"] = float(latency_ms)
+    if provider is not None:
+        closed["provider"] = provider
+    if model is not None:
+        closed["model"] = model
+    closed["schema"] = SCHEMA
+    closed["close_ts"] = time.time()
+    closed["close_source"] = source
+    b_in = closed.get("baseline_input_tokens")
+    b_out = closed.get("baseline_output_tokens")
+    base_tot = None
+    try:
+        if b_in is not None or b_out is not None:
+            base_tot = int(b_in or 0) + int(b_out or 0)
+    except (TypeError, ValueError):
+        base_tot = None
+    meas = closed.get("measured_frontier_tokens")
+    if base_tot is not None and meas is not None:
+        try:
+            closed["actual_tokens_saved"] = max(0, base_tot - int(meas))
+        except (TypeError, ValueError):
+            pass
+    # strip non-receipt noise from bridge merge
+    for k in ("preflight", "kerdoios_plan", "prompt", "receipt"):
+        closed.pop(k, None)
+    row = append_receipt(closed, root=root)
+    joined = None
+    if outcome is not None:
+        joined = join_outcome(trace_id, outcome, root=root)
+    return {
+        "schema": "z0int.turn_close.v1",
+        "trace_id": trace_id,
+        "receipt": row,
+        "outcome_join": joined,
+        "actual_tokens_saved": row.get("actual_tokens_saved"),
+        "measured_frontier_tokens": row.get("measured_frontier_tokens"),
+        "baseline_tokens": base_tot,
+    }
+
+
 def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict[str, Any]:
     """Aggregate estimated + measured frontier-token economics.
 

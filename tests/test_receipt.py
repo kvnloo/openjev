@@ -118,5 +118,40 @@ class ReceiptCli(unittest.TestCase):
                     os.environ["Z0INT_HOME"] = old
 
 
+
+class ReceiptClose(unittest.TestCase):
+    def test_close_turn_measured_savings(self):
+        from z0int.receipt import Outcome, append_receipt, build_receipt, close_turn, summarize_tokenomics
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            r = append_receipt(
+                build_receipt(
+                    capability_id="coding.edit",
+                    route="model",
+                    baseline_input_tokens=2500,
+                    baseline_output_tokens=600,
+                    estimated_frontier_tokens_avoided=0,
+                ),
+                root=home,
+            )
+            tid = r["trace_id"]
+            closed = close_turn(
+                tid,
+                measured_frontier_tokens=1240,
+                input_tokens=900,
+                output_tokens=340,
+                outcome=Outcome(test_pass=True, success=True, source="test"),
+                root=home,
+            )
+            self.assertEqual(closed["schema"], "z0int.turn_close.v1")
+            self.assertEqual(closed["actual_tokens_saved"], 1860)
+            self.assertEqual(closed["outcome_join"]["outcome_tier"], "gold")
+            s = summarize_tokenomics(root=home)
+            self.assertGreaterEqual(s["rows_with_baseline_and_measured"], 1)
+            self.assertGreaterEqual(s["actual_tokens_saved"], 1860)
+            self.assertGreaterEqual(s["measured_frontier_tokens_sum"], 1240)
+
+
 if __name__ == "__main__":
     unittest.main()

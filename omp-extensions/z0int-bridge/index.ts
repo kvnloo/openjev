@@ -1,27 +1,23 @@
 /**
  * z0int ↔ Kerdoios bridge (log-only host adapter).
  *
- * Boundary:
- *   z0int decides what does NOT need a frontier LLM (preflight).
- *   Kerdoios decides where residual cognition runs (ExecutionPlan only).
- *   Harness executes. This extension does not inject skill_relevance and
- *   does not force model switches yet — it measures the loop.
- *
- * Surfaces:
- *   before_agent_start → preflight (+ kerdoios plan when route=model)
- *   after turn (best-effort) → receipt with counterfactual tokens avoided
- *
- * Logs under ~/.z0int/stream and ~/.z0int/shadow.
+ * before_agent_start → preflight (+ kerdoios plan when route=model)
+ *   writes ~/.z0int/stream/bridge.jsonl + dual-write decision receipt
+ * agent_end → close last open trace (measured tokens + outcome + kerdoios record)
  */
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
-const STREAM = join(homedir(), ".z0int", "stream", "bridge.jsonl");
-const SHADOW = join(homedir(), ".z0int", "shadow", "preflight.jsonl");
+const Z0 = join(homedir(), ".z0int");
+const STREAM = join(Z0, "stream", "bridge.jsonl");
+const SHADOW = join(Z0, "shadow", "preflight.jsonl");
+const OPEN = join(Z0, "stream", "open_turns.jsonl");
+const LAST = join(Z0, "stream", "last_open.json");
+
 const PY =
 	process.env.EVOLUTION_LAB_PYTHON ||
 	"/workspace/evolution-lab/.venv/bin/python";
@@ -47,44 +43,71 @@ async function runCmd(
 	cwd: string,
 	timeoutMs: number,
 ): Promise<PyResult> {
-	const { promise, resolve } = Promise.withResolvers<PyResult>();
-	const child = spawn(cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
-	let stdout = "";
-	let stderr = "";
-	const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-	child.stdout.on("data", d => {
-		stdout += String(d);
+	return await new Promise((resolve) => {
+		const child = spawn(cmd, args, { cwd, env: process.env });
+		let stdout = "";
+		let stderr = "";
+		const t = setTimeout(() => {
+			try {
+				child.kill("SIGKILL");
+			} catch {
+				/* */
+			}
+			resolve({ code: 124, stdout, stderr: stderr + "\ntimeout" });
+		}, timeoutMs);
+		child.stdout.on("data", (d) => {
+			stdout += String(d);
+		});
+		child.stderr.on("data", (d) => {
+			stderr += String(d);
+		});
+		child.on("close", (code) => {
+			clearTimeout(t);
+			resolve({ code: code ?? 1, stdout, stderr });
+		});
+		child.on("error", (err) => {
+			clearTimeout(t);
+			resolve({ code: 1, stdout, stderr: String(err) });
+		});
 	});
-	child.stderr.on("data", d => {
-		stderr += String(d);
-	});
-	child.on("close", code => {
-		clearTimeout(timer);
-		resolve({ code: code ?? 1, stdout, stderr });
-	});
-	child.on("error", err => {
-		clearTimeout(timer);
-		resolve({ code: 1, stdout, stderr: String(err) });
-	});
-	return promise;
 }
 
 function parseJson(r: PyResult): Jsonish {
-	const t = r.stdout.trim();
-	if (!t) return { ok: false, error: r.stderr || "empty" };
+	const raw = (r.stdout || "").trim();
+	if (!raw) return { ok: false, error: r.stderr || `exit_${r.code}` };
 	try {
-		const start = t.indexOf("{");
-		const end = t.lastIndexOf("}");
-		if (start < 0 || end < start) return { ok: false, error: "no_json" };
-		return JSON.parse(t.slice(start, end + 1)) as Jsonish;
-	} catch (e) {
-		return { ok: false, error: String(e), raw: t.slice(0, 200) };
+		return JSON.parse(raw) as Jsonish;
+	} catch {
+		// last JSON object in stream
+		const lines = raw.split("\n").filter(Boolean);
+		for (let i = lines.length - 1; i >= 0; i--) {
+			try {
+				return JSON.parse(lines[i]!) as Jsonish;
+			} catch {
+				/* */
+			}
+		}
+		return { ok: false, error: "json_parse", raw: raw.slice(0, 400) };
 	}
 }
 
 function append(path: string, row: Jsonish): void {
-	mkdirSync(join(path, ".."), { recursive: true });
-	appendFileSync(path, JSON.stringify(row) + "\n");
+	mkdirSync(dirname(path), { recursive: true });
+	appendFileSync(path, JSON.stringify(row) + "\n", "utf8");
+}
+
+function writeLast(row: Jsonish): void {
+	mkdirSync(dirname(LAST), { recursive: true });
+	writeFileSync(LAST, JSON.stringify(row, null, 2), "utf8");
+}
+
+function readLast(): Jsonish | null {
+	if (!existsSync(LAST)) return null;
+	try {
+		return JSON.parse(readFileSync(LAST, "utf8")) as Jsonish;
+	} catch {
+		return null;
+	}
 }
 
 async function preflight(prompt: string): Promise<Jsonish> {
@@ -106,23 +129,32 @@ async function kerdoiosPlan(capabilityId: string, work: Jsonish | null): Promise
 		"--mode",
 		String(work.mode || "balanced"),
 	];
-	if (typeof work.coding === "number") {
-		args.push("--coding", String(work.coding));
-	}
-	if (typeof work.reasoning === "number") {
-		args.push("--reasoning", String(work.reasoning));
-	}
+	if (typeof work.coding === "number") args.push("--coding", String(work.coding));
+	if (typeof work.reasoning === "number") args.push("--reasoning", String(work.reasoning));
 	const r = await runCmd(KERD_PY, args, KERD_ROOT, 12000);
-	if (r.code !== 0) {
-		return { ok: false, error: r.stderr || r.stdout || `exit_${r.code}` };
-	}
+	if (r.code !== 0) return { ok: false, error: r.stderr || r.stdout || `exit_${r.code}` };
 	return parseJson(r);
 }
 
-async function turnBridge(prompt: string, sessionId: string | undefined): Promise<void> {
+async function dualWriteReceipt(receipt: Jsonish): Promise<void> {
+	const payload = JSON.stringify(receipt);
+	await runCmd(
+		Z0_PY,
+		[
+			"-c",
+			"import json,sys; from z0int.receipt import append_receipt; append_receipt(json.loads(sys.argv[1]))",
+			payload,
+		],
+		Z0_ROOT,
+		3000,
+	);
+}
+
+async function turnBridge(prompt: string, sessionId: string | undefined): Promise<Jsonish> {
 	const t0 = Date.now();
 	const pf = await preflight(prompt);
-	const capabilityId = typeof pf.capability_id === "string" ? pf.capability_id : "coding.next_action";
+	const capabilityId =
+		typeof pf.capability_id === "string" ? pf.capability_id : "coding.next_action";
 	const route = typeof pf.route === "string" ? pf.route : "model";
 	let plan: Jsonish | null = null;
 	if (route === "model") {
@@ -151,15 +183,21 @@ async function turnBridge(prompt: string, sessionId: string | undefined): Promis
 			? pf.estimated_frontier_tokens_avoided
 			: 0;
 	const isLocal = route === "local";
-	const receipt = {
+	const receipt: Jsonish = {
 		schema: "z0int.decision_receipt.v1",
 		trace_id: traceId,
 		session_id: sessionId ?? process.env.OMP_SESSION_ID ?? null,
 		capability_id: capabilityId,
 		provider: isLocal ? "local_mb" : plan ? "kerdoios_plan" : "frontier",
 		model: isLocal ? "mb_local" : null,
-		prediction: typeof pf.label === "string" ? pf.label : typeof pf.prediction === "string" ? pf.prediction : null,
-		confidence: typeof pf.p === "number" ? pf.p : typeof pf.confidence === "number" ? pf.confidence : null,
+		prediction:
+			typeof pf.label === "string"
+				? pf.label
+				: typeof pf.prediction === "string"
+					? pf.prediction
+					: null,
+		confidence:
+			typeof pf.p === "number" ? pf.p : typeof pf.confidence === "number" ? pf.confidence : null,
 		action_taken: route,
 		route,
 		execution: "log_only",
@@ -187,21 +225,10 @@ async function turnBridge(prompt: string, sessionId: string | undefined): Promis
 		receipt,
 	};
 	append(STREAM, row);
-	// Dual-write canonical receipts.jsonl via z0int python when available (best-effort).
 	try {
-		const payload = JSON.stringify(receipt);
-		await runCmd(
-			Z0_PY,
-			[
-				"-c",
-				"import json,sys; from z0int.receipt import append_receipt; append_receipt(json.loads(sys.argv[1]))",
-				payload,
-			],
-			Z0_ROOT,
-			3000,
-		);
+		await dualWriteReceipt(receipt);
 	} catch {
-		/* still have bridge.jsonl */
+		/* bridge.jsonl still stands */
 	}
 	append(SHADOW, {
 		ts: row.ts,
@@ -211,11 +238,120 @@ async function turnBridge(prompt: string, sessionId: string | undefined): Promis
 		avoided,
 		plan_ok: plan ? plan.ok !== false && !plan.error : null,
 	});
+	const open = {
+		schema: "z0int.open_turn.v1",
+		trace_id: traceId,
+		session_id: receipt.session_id,
+		capability_id: capabilityId,
+		route,
+		baseline_input_tokens: baselineIn,
+		baseline_output_tokens: baselineOut,
+		provider: receipt.provider,
+		ts: receipt.ts,
+	};
+	append(OPEN, open);
+	writeLast(open);
+	return row;
+}
 
+function estimateMeasuredFromMessages(messages: unknown[]): {
+	input_tokens: number;
+	output_tokens: number;
+	measured: number;
+} {
+	// Cheap proxy when harness does not expose provider usage: char/4.
+	// Still proves close path; replace when OMP surfaces real usage.
+	let userChars = 0;
+	let asstChars = 0;
+	for (const m of messages || []) {
+		if (!m || typeof m !== "object") continue;
+		const role = String((m as { role?: unknown }).role || "");
+		const content = (m as { content?: unknown }).content;
+		let text = "";
+		if (typeof content === "string") text = content;
+		else if (Array.isArray(content)) {
+			for (const c of content) {
+				if (c && typeof c === "object" && "text" in c) text += String((c as { text: unknown }).text || "");
+			}
+		}
+		if (role === "user") userChars += text.length;
+		else if (role === "assistant") asstChars += text.length;
+	}
+	const input_tokens = Math.max(1, Math.round(userChars / 4));
+	const output_tokens = Math.max(1, Math.round(asstChars / 4));
+	return { input_tokens, output_tokens, measured: input_tokens + output_tokens };
+}
+
+async function closeOpenTurn(opts: {
+	traceId?: string;
+	measured?: number;
+	inputTokens?: number;
+	outputTokens?: number;
+	success?: boolean;
+	testPass?: boolean;
+	toolOk?: boolean;
+	source?: string;
+	provider?: string;
+	model?: string;
+}): Promise<Jsonish> {
+	const last = readLast();
+	const traceId = opts.traceId || (last && typeof last.trace_id === "string" ? last.trace_id : null);
+	if (!traceId) return { ok: false, error: "no_open_trace" };
+
+	const args = [
+		"-m",
+		"z0int",
+		"receipt",
+		"close",
+		traceId,
+		"--source",
+		opts.source || "bridge_agent_end",
+	];
+	if (opts.measured != null) args.push("--measured", String(opts.measured));
+	if (opts.inputTokens != null) args.push("--input-tokens", String(opts.inputTokens));
+	if (opts.outputTokens != null) args.push("--output-tokens", String(opts.outputTokens));
+	if (opts.provider) args.push("--provider", opts.provider);
+	if (opts.model) args.push("--model", opts.model);
+	if (opts.success != null) args.push("--success", opts.success ? "true" : "false");
+	if (opts.testPass != null) args.push("--test-pass", opts.testPass ? "true" : "false");
+	if (opts.toolOk != null) args.push("--tool-ok", opts.toolOk ? "true" : "false");
+
+	const r = await runCmd(Z0_PY, args, Z0_ROOT, 5000);
+	const closed = parseJson(r);
+
+	// Kerdoios observed economics (best-effort)
+	try {
+		const cap =
+			(last && typeof last.capability_id === "string" && last.capability_id) ||
+			"coding.next_action";
+		const kArgs = [
+			"-m",
+			"kerdoios",
+			"record",
+			"--provider",
+			opts.provider || "omp_bridge",
+			"--model",
+			opts.model || "session",
+			"--task-type",
+			"coding",
+			"--capability-id",
+			cap,
+			"--cost",
+			"0",
+		];
+		if (opts.success !== false) kArgs.push("--completed");
+		if (opts.inputTokens != null) kArgs.push("--input-tokens", String(opts.inputTokens));
+		if (opts.outputTokens != null) kArgs.push("--output-tokens", String(opts.outputTokens));
+		await runCmd(KERD_PY, kArgs, KERD_ROOT, 5000);
+	} catch {
+		/* */
+	}
+	return closed;
 }
 
 export default function z0intBridge(pi: ExtensionAPI) {
-	pi.setLabel("z0int preflight → Kerdoios residual (log-only)");
+	pi.setLabel("z0int preflight → Kerdoios residual → close (log-only)");
+
 	pi.on("before_agent_start", async (event, ctx) => {
 		const prompt =
 			event && typeof event === "object" && "prompt" in event
@@ -232,6 +368,62 @@ export default function z0intBridge(pi: ExtensionAPI) {
 			return;
 		}
 	});
+
+	pi.on("agent_end", async (event) => {
+		try {
+			if (event && typeof event === "object" && "willContinue" in event && (event as { willContinue?: boolean }).willContinue) {
+				return;
+			}
+			const messages =
+				event && typeof event === "object" && "messages" in event
+					? ((event as { messages?: unknown[] }).messages || [])
+					: [];
+			const est = estimateMeasuredFromMessages(messages);
+			await closeOpenTurn({
+				measured: est.measured,
+				inputTokens: est.input_tokens,
+				outputTokens: est.output_tokens,
+				success: true,
+				toolOk: true,
+				source: "bridge_agent_end",
+			});
+		} catch {
+			return;
+		}
+	});
+
+	pi.registerCommand("z0int-close", {
+		description: "Close last open z0int turn with measured tokens + outcome",
+		async handler(args, ctx) {
+			try {
+				const parts = String(args || "").trim().split(/\s+/).filter(Boolean);
+				let measured: number | undefined;
+				let success = true;
+				for (let i = 0; i < parts.length; i++) {
+					if (parts[i] === "--measured" && parts[i + 1]) measured = Number(parts[++i]);
+					if (parts[i] === "--fail") success = false;
+				}
+				const closed = await closeOpenTurn({
+					measured,
+					success,
+					testPass: success,
+					toolOk: success,
+					source: "z0int-close-cmd",
+				});
+				ctx.ui.notify(
+					`z0int close: ${JSON.stringify({
+						ok: !closed.error,
+						trace: closed.trace_id || closed.receipt && (closed.receipt as Jsonish).trace_id,
+						saved: closed.actual_tokens_saved,
+						measured: closed.measured_frontier_tokens,
+					})}`,
+					closed.error ? "error" : "info",
+				);
+			} catch (e) {
+				ctx.ui.notify(String(e), "error");
+			}
+		},
+	});
 }
 
-export { preflight, turnBridge };
+export { preflight, turnBridge, closeOpenTurn };
