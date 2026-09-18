@@ -11,7 +11,9 @@ from z0int.abab import (
     ExperimentMetrics,
     ExperimentProposal,
     ExperimentRecord,
+    calibrate_credit_gate,
     choose_next,
+    transfer_credit_ok,
     gate_status,
     should_run_c,
 )
@@ -94,6 +96,22 @@ class AbabMetaLoopTests(unittest.TestCase):
         self.assertTrue(should_run_c(experiment_value=0.8, further_research_value=0.3, competing_hypotheses=2))
         self.assertFalse(should_run_c(experiment_value=0.2, further_research_value=0.3, competing_hypotheses=2))
         self.assertFalse(should_run_c(experiment_value=0.9, further_research_value=0.1, competing_hypotheses=1))
+
+    def test_phase0_gate_calibration_must_separate_known_controls(self) -> None:
+        good = credited(prop("known-good", "cal"), ExperimentMetrics(verified_success=1.0))
+        bad_gates = CreditGates(validity=True, activation=True, credit=False)
+        bad = ExperimentRecord(prop("known-bad", "cal"), "rejected", gates=bad_gates)
+        cal = calibrate_credit_gate([(good, True), (bad, False)], min_good_accept=1.0, min_bad_reject=1.0)
+        self.assertTrue(cal.passed)
+
+        broken = calibrate_credit_gate([(bad, True), (good, False)], min_good_accept=1.0, min_bad_reject=1.0)
+        self.assertFalse(broken.passed)
+
+    def test_transfer_gate_preserves_cross_family_lift(self) -> None:
+        weak = credited(prop("weak-transfer", "x"), ExperimentMetrics(transfer_retention=0.4))
+        strong = credited(prop("strong-transfer", "x"), ExperimentMetrics(transfer_retention=0.9))
+        self.assertFalse(transfer_credit_ok(weak, floor=0.8))
+        self.assertTrue(transfer_credit_ok(strong, floor=0.8))
 
     def test_archive_round_trip(self) -> None:
         rec = credited(prop("x", "recovery"), ExperimentMetrics(verified_success=1.0), cost=2.0)

@@ -275,6 +275,59 @@ class ExperimentArchive:
         return cls(rows)
 
 
+
+@dataclass(frozen=True)
+class GateCalibration:
+    n_good: int
+    n_bad: int
+    good_accept_rate: float | None
+    bad_reject_rate: float | None
+    passed: bool
+    min_good_accept: float
+    min_bad_reject: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def calibrate_credit_gate(
+    controls: Sequence[tuple[ExperimentRecord, bool]],
+    *,
+    min_good_accept: float = 0.80,
+    min_bad_reject: float = 0.80,
+) -> GateCalibration:
+    """Phase-0 calibration on known-good / known-bad controls.
+
+    The loop should not self-evolve if its credit gate cannot distinguish
+    human-authored controls whose direction is already known.
+    """
+    good = [r for r, expected_good in controls if expected_good]
+    bad = [r for r, expected_good in controls if not expected_good]
+    good_rate = (sum(1 for r in good if r.gates.passed) / len(good)) if good else None
+    bad_rate = (sum(1 for r in bad if not r.gates.passed) / len(bad)) if bad else None
+    passed = bool(
+        good_rate is not None
+        and bad_rate is not None
+        and good_rate >= min_good_accept
+        and bad_rate >= min_bad_reject
+    )
+    return GateCalibration(
+        n_good=len(good),
+        n_bad=len(bad),
+        good_accept_rate=good_rate,
+        bad_reject_rate=bad_rate,
+        passed=passed,
+        min_good_accept=min_good_accept,
+        min_bad_reject=min_bad_reject,
+    )
+
+
+def transfer_credit_ok(record: ExperimentRecord, *, floor: float = 0.80) -> bool:
+    """A credited candidate must retain enough lift off its development niche."""
+    val = record.metrics.transfer_retention
+    return val is None or val >= floor
+
+
 def choose_next(proposals: Sequence[ExperimentProposal], *, config: AbabConfig | None = None) -> ExperimentProposal | None:
     cfg = config or AbabConfig()
     eligible = [p for p in proposals if p.priority() >= cfg.min_priority]
