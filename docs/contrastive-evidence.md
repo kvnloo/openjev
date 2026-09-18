@@ -2,16 +2,42 @@
 
 Nimble-inspired **unit of learning**, not Nimble weights.
 
+## Four condition classes
+
 | Condition | Expect |
 |-----------|--------|
-| original | preserve decision |
-| relevant_edit | flip decision |
-| irrelevant_control | preserve |
-| necessity_delete | abstain (not false) |
+| `original` | preserve decision |
+| `relevant_edit` | flip decision (source fact edit, not answer injection) |
+| `irrelevant_control` | preserve |
+| `necessity_delete:{id}` | abstain per required evidence item |
+| `necessity_delete:all` | abstain when all necessary removed |
+
+Probe `derive_implementation_decision` reads **source facts** (`rfc_revision`, `superseded`) — never `facts.decision`.
+
+## P0 capability
+
+```text
+context.current_project_state
+context.current_implementation_decision  (narrower fixture)
+```
+
+## CLI
 
 ```bash
 z0int contrastive eval --json --store
-z0int autoresearch enqueue --trace-id T --verifier-id V --kind contrastive_evidence --json
+z0int contrastive race --json
+z0int context-state fixture --json
+z0int context-state compile snapshot.json --json
 ```
 
-`curation_accepted` ≠ `verified_success`. Not production-credit-eligible.
+## Metrics
+
+Grouped-family gate (not row-average):
+
+```text
+P(entire contrast family correct) = full_family_pass_rate
+```
+
+`EvidenceDependency` records `requires`, `invariants`, `invalidated_by`, `fastest_recipe` for semantic cache invalidation.
+
+`curation_accepted` ≠ `verified_success`.

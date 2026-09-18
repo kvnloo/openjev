@@ -507,6 +507,21 @@ def build_parser() -> argparse.ArgumentParser:
     _json_flag(ct_ev)
     ct_fx = ct_sub.add_parser("fixture", help="Print built-in project_status contrast family")
     _json_flag(ct_fx)
+    ct_race = ct_sub.add_parser("race", help="Ordinary vs contrastive gate on frozen families")
+    ct_race.add_argument("--families-jsonl", default=None, help="JSONL of ContrastFamily rows")
+    ct_race.add_argument("--recipe-json", default=None)
+    _json_flag(ct_race)
+
+    cps = sub.add_parser(
+        "context-state",
+        help="Frozen capability context.current_project_state",
+    )
+    cps_sub = cps.add_subparsers(dest="context_state_cmd", required=True)
+    cps_fx = cps_sub.add_parser("fixture", help="Built-in contrast family for P0 capability")
+    _json_flag(cps_fx)
+    cps_cmp = cps_sub.add_parser("compile", help="Compile episode from workspace snapshot JSON")
+    cps_cmp.add_argument("snapshot_json")
+    _json_flag(cps_cmp)
 
     ar = sub.add_parser("autoresearch", help="Verified Trajectory Superoptimizer")
     ar_sub = ar.add_subparsers(dest="autoresearch_cmd", required=True)
@@ -852,6 +867,34 @@ def main(argv: list[str] | None = None) -> int:
                 out["dependency_path"] = str(path)
             _print(out, as_json=as_json)
             return 0 if out.get("full_pass") else 1
+        if args.contrastive_cmd == "race":
+            from .data_recipe_race import race_data_recipes
+
+            if getattr(args, "families_jsonl", None):
+                families = []
+                for line in Path(args.families_jsonl).read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line:
+                        families.append(ce.ContrastFamily.from_dict(_json.loads(line)))
+            else:
+                families = [ce.example_project_status_family()]
+            recipe = None
+            if getattr(args, "recipe_json", None):
+                recipe = _json.loads(Path(args.recipe_json).read_text(encoding="utf-8"))
+            out = race_data_recipes(families, recipe=recipe)
+            _print(out, as_json=as_json)
+            return 0
+
+    if args.cmd == "context-state":
+        from .capabilities import context_project_state as cps
+
+        if args.context_state_cmd == "fixture":
+            _print(cps.fixture_family().to_dict(), as_json=True)
+            return 0
+        if args.context_state_cmd == "compile":
+            snap = _json.loads(Path(args.snapshot_json).read_text(encoding="utf-8"))
+            _print(cps.compile_episode(snap), as_json=as_json)
+            return 0
 
     if args.cmd == "autoresearch":
         from .autoresearch import daemon as ar_daemon
