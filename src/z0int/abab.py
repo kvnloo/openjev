@@ -432,3 +432,91 @@ def choose_discriminating_test(
     if not ranked:
         return None
     return max(ranked, key=lambda x: (x[0], -x[1].estimated_cost, x[1].id))[1]
+
+
+def _load_proposals(path: Path) -> list[ExperimentProposal]:
+    out: list[ExperimentProposal] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        raw = json.loads(line)
+        out.append(
+            ExperimentProposal(
+                id=str(raw["id"]),
+                hypothesis_id=str(raw.get("hypothesis_id") or raw["id"]),
+                niche=str(raw.get("niche") or "default"),
+                summary=str(raw.get("summary") or ""),
+                expected_information_gain=float(raw.get("expected_information_gain") or 0.0),
+                impact=float(raw.get("impact") or 0.0),
+                decision_change=float(raw.get("decision_change") or 0.0),
+                transferability=float(raw.get("transferability") or 0.0),
+                estimated_cost=float(raw.get("estimated_cost") or 1.0),
+            )
+        )
+    return out
+
+
+def _main(argv: list[str] | None = None) -> int:
+    """Thin CLI for archive inspection / next-proposal selection."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python -m z0int.abab")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("summary", help="summarize an experiment archive JSONL")
+    s.add_argument("--archive", type=Path, required=True)
+    s.add_argument("--niche", default=None)
+
+    n = sub.add_parser("next", help="choose next A-stage proposal from JSONL")
+    n.add_argument("--proposals", type=Path, required=True)
+
+    st = sub.add_parser("stop", help="report stop reason for archive (+ optional proposals)")
+    st.add_argument("--archive", type=Path, required=True)
+    st.add_argument("--proposals", type=Path, default=None)
+
+    args = parser.parse_args(argv)
+    if args.cmd == "summary":
+        arch = ExperimentArchive.from_jsonl(args.archive)
+        niches = arch.champion_niches()
+        payload: dict[str, Any] = {
+            "schema": "z0int.abab_summary.v1",
+            "n_records": len(arch.records),
+            "cost_per_credit": arch.cost_per_credit(),
+            "no_update_streak": arch.no_update_streak(),
+            "champion_niches": {k: [r.id for r in v] for k, v in niches.items()},
+            "pareto": [r.id for r in pareto_front(arch.records)],
+        }
+        if args.niche:
+            payload["niche_front"] = [r.id for r in arch.niche_front(args.niche)]
+        print(json.dumps(payload, indent=2))
+        return 0
+    if args.cmd == "next":
+        chosen = choose_next(_load_proposals(args.proposals))
+        print(
+            json.dumps(
+                {"ok": chosen is not None, "chosen": None if chosen is None else chosen.to_dict()},
+                indent=2,
+            )
+        )
+        return 0 if chosen is not None else 2
+    if args.cmd == "stop":
+        arch = ExperimentArchive.from_jsonl(args.archive)
+        proposals = _load_proposals(args.proposals) if args.proposals and args.proposals.is_file() else []
+        reason = arch.stop_reason(proposals)
+        print(
+            json.dumps(
+                {
+                    "schema": "z0int.abab_stop.v1",
+                    "stop_reason": reason,
+                    "should_stop": reason is not None,
+                },
+                indent=2,
+            )
+        )
+        return 0
+    raise AssertionError(args.cmd)
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

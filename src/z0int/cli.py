@@ -2,6 +2,9 @@
 
 Deterministic lifecycle. Agents should invoke these commands instead of
 reproducing setup steps from README memory.
+
+Future compiler stack (library modules still usable via python -m):
+  z0int routine|cascade|aodl|repair|abab …
 """
 
 from __future__ import annotations
@@ -268,7 +271,10 @@ def cmd_receipt_scrub(*, as_json: bool, dry_run: bool) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="z0int",
-        description="Personal intelligence lifecycle — onboard, doctor, status, models, receipt",
+        description=(
+            "Personal intelligence lifecycle — onboard, doctor, status, models, "
+            "receipt, routine/cascade/aodl/repair/abab"
+        ),
     )
     p.add_argument("--json", action="store_true", dest="as_json", help="Machine-readable JSON output")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -407,6 +413,20 @@ def build_parser() -> argparse.ArgumentParser:
     cfs = cf_sub.add_parser("summary", help="Replay grade / pair inventory")
     _json_flag(cfs)
 
+    # Future compiler stack — remainder args forwarded to module CLIs.
+    for name, help_txt in (
+        ("routine", "Compile/apply specialist region routines (→ z0int.routines)"),
+        ("cascade", "Optimize specialist cascades for premium tokens (→ z0int.cascade)"),
+        ("aodl", "Bind routines/cascades into AODL strategy docs (→ z0int.aodl)"),
+        ("repair", "Counterexample-driven routine repair (→ z0int.refinement)"),
+        ("abab", "ABAB experiment archive helpers (→ z0int.abab)"),
+    ):
+        sp = sub.add_parser(name, help=help_txt)
+        sp.add_argument(
+            "module_argv",
+            nargs=argparse.REMAINDER,
+            help=f"Arguments for the {name} subcommand (see z0int {name} -h)",
+        )
 
     return p
 
@@ -464,6 +484,27 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_mine(args=args, as_json=as_json)
         if args.counterfactual_cmd == "summary":
             return cmd_summary(args=args, as_json=as_json)
+
+    if args.cmd in ("routine", "cascade", "aodl", "repair", "abab"):
+        rest = list(getattr(args, "module_argv", None) or [])
+        # argparse REMAINDER keeps a leading "--" when users write: z0int routine -- compile ...
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        # bare `z0int routine` / `z0int routine -h` → module help
+        if not rest or rest in (["-h"], ["--help"]):
+            rest = ["--help"]
+        if args.cmd == "routine":
+            from .routines import _main as _mod_main
+        elif args.cmd == "cascade":
+            from .cascade import _main as _mod_main
+        elif args.cmd == "aodl":
+            from .aodl import _main as _mod_main
+        elif args.cmd == "repair":
+            from .refinement import main as _mod_main
+        else:
+            from .abab import _main as _mod_main
+        return int(_mod_main(rest))
+
     parser.error(f"unknown command: {args.cmd}")
     return 2
 

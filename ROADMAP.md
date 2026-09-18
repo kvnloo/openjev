@@ -481,3 +481,7 @@ A candidate that is biologically interesting but does not improve the measured f
 - Claiming that a small specialist understands a person's identity simply because it memorized their text.
 
 The project succeeds when **verified outcomes improve while expensive generic inference decreases**.
+
+## Compiler stack status (2026-09-18 integration)
+
+The routine → cascade → ABAB credit → AODL plan → repair loop is **implemented in source** on branch `integrate/z0int-future-stack`. See README “Future compiler stack” for the honesty split (synthetic measured vs not product-validated). Live promotion still requires sealed private cohorts and independent full-cascade credit before traffic.
