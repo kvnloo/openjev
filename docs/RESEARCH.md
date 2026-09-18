@@ -1358,7 +1358,9 @@ NOW / DONE (2026-09-17 → data-engine pivot)
      - wave-5 pack: n_kc=96 k_winners=20 pn_dim=64 confirm=0.572 (beats ridge 0.363)
      - promote-only writes; champion.npz gitignored + history-scrubbed (local only)
   10. safe-offload metric shift: maximize coverage @ ≥95% precision (not raw acc)
-     - risk/coverage gen-0: DELEGATE *predictions* are ~0.980 precise (n=3063, ~19.9% confirm)
+     - **FROZEN claim language** → `docs/SCIENCE_CLAIMS.md` + `coverage_metric.frozen_claims()`
+     - risk/coverage gen-0: DELEGATE *predictions* ~0.980 precise (n=3063, ~19.9% confirm)
+       → prediction-conditional only; report base-rate / lift / FPR with precision
        → absorb **all** DELEGATE preds locally (min_p=0)
      - EXECUTE has **no** ≥0.90 precision slice by margin; keep high-conf only
        (p≥0.60, margin≥0.30 → n≈2931 prec≈0.664)
