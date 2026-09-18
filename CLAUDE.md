@@ -7,4 +7,7 @@ For setup and onboarding:
 3. Do not bypass privacy/secret checks.
 4. Do not invent unimplemented steps — check `z0int --help` and the docs.
 
+Contribution process: [Verified OSS Loop](docs/verified-oss-loop.md) (`.verified-oss-loop/`). Workers never merge `master`/`dev`.
+
 See also `AGENTS.md` and `skills/z0int-onboard/SKILL.md`.
+
