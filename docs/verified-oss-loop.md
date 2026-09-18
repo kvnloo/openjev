@@ -27,5 +27,5 @@ python3 .verified-oss-loop/kit-inventory.py show --root .
 ```
 
 Protocol: https://github.com/kvnloo/verified-oss-loop  
-Repo: https://github.com/kvnloo/z0int
+Repo: https://github.com/kvnloo/z0intelligence
 

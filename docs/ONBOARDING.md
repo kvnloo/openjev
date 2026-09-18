@@ -11,7 +11,7 @@ Do **not** reproduce install steps from memory — run the CLI.
 ## One-command path
 
 ```bash
-git clone https://github.com/kvnloo/z0int
+git clone https://github.com/kvnloo/z0intelligence
 cd z0int
 ./scripts/bootstrap.sh          # creates venv, installs package, runs doctor
 z0int onboard --auto            # resumable; safe to re-run

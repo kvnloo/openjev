@@ -1450,7 +1450,7 @@ This should come before:
 
 # 30. Important current links
 
-- z0int: https://github.com/kvnloo/z0int
+- z0int: https://github.com/kvnloo/z0intelligence
 - Evolution Lab: https://github.com/kvnloo/evolution-lab
 - AODL: https://github.com/kvnloo/aodl
 - frontier-kb: https://github.com/kvnloo/frontier-kb
