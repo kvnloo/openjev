@@ -116,3 +116,9 @@ The future branch now codifies the Frontier KB research discipline in `src/z0int
 - AODL hot-plane refusal of uncredited strategies (shadow remains explicit).
 
 See `docs/abab-loop.md`.
+
+## Current continuation: counterexample-driven routine repair
+
+Implemented in `src/z0int/refinement.py`. A demoted outcome-backed routine can produce one narrower, dev-selected candidate, receive fresh sealed and future credit, and be explicitly activated into a new registry. Drifted parent rules remain disabled. The private trial journal prevents cohort shopping and supports restart-idempotent scoring. The AODL composition remains shadow-only until independently credited at the cascade/harness level.
+
+See `docs/routine-repair.md`, `skills/z0int-repair-routine/SKILL.md`, and `REFINEMENT_IMPLEMENTATION_REPORT.md`. The runnable synthetic demo is `examples/refinement/demo.py`. No real workload savings are claimed.

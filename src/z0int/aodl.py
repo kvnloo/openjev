@@ -104,6 +104,7 @@ class AodlBindingConfig:
     stage_roles: Mapping[str, str] = field(default_factory=dict)
     include_routine_slot: bool = True
     allow_uncredited_shadow: bool = False
+    include_candidate_routines_in_shadow: bool = False
     source: str = "z0int"
 
     def __post_init__(self) -> None:
@@ -320,7 +321,14 @@ def compile_aodl(
             "set allow_uncredited_shadow=True for explicit shadow evaluation"
         )
 
-    promoted = _promoted_routines(routines)
+    if cfg.include_candidate_routines_in_shadow and not shadow:
+        raise ValueError("candidate routine bindings are shadow-only")
+    promoted = (
+        [r for r in routines if r.status in {"candidate", "credited", "promoted"}]
+        if cfg.include_candidate_routines_in_shadow else _promoted_routines(routines)
+    )
+    if any(r.capability_id != capability_id for r in promoted):
+        raise ValueError("routine capability_id does not match the compiled capability")
     # Intent provenance excludes implementation details. A new champion, routine
     # or threshold changes planHash, not sourceHash.
     intent_material = {
@@ -428,12 +436,19 @@ def compile_aodl(
             "artifactType": "z0int.routine_registry.v1",
             "uri": "z0int://routines",
             "routineIds": sorted(r.routine_id for r in promoted),
+            "routineArtifacts": {
+                r.routine_id: {"sha256": source_hash(r.to_dict()), "status": r.status}
+                for r in sorted(promoted, key=lambda r: r.routine_id)
+            },
             "enabled": bool(promoted),
         }
         bindings[cfg.routine_service_id] = {
             "kind": "service",
             "runtime": "z0int",
-            "entrypoint": "routine_registry.decide",
+            "entrypoint": (
+                "routine_registry.decide_shadow" if cfg.include_candidate_routines_in_shadow
+                else "routine_registry.decide"
+            ),
             "enabled": bool(promoted),
             "failOpen": "next_route_stage",
             "artifact": cfg.routine_artifact_id,
@@ -485,7 +500,13 @@ def compile_aodl(
             "receipts": "confidential",
         },
     }
+    deployment = {
+        "mode": "shadow" if shadow else "production",
+        "creditStatus": cascade.status,
+        "trafficEligible": not shadow,
+    }
     plan_material = {
+        "deployment": deployment,
         "bindings": bindings,
         "route_order": route_order,
         "final": final_node,
@@ -498,11 +519,7 @@ def compile_aodl(
     plan = {
         "compiler": "z0int.aodl.v2",
         "profile": "intent-contract",
-        "deployment": {
-            "mode": "shadow" if shadow else "production",
-            "creditStatus": cascade.status,
-            "trafficEligible": not shadow,
-        },
+        "deployment": deployment,
         "harnessId": cfg.harness_id,
         "sourceHash": sh,
         "planHash": plan_hash,

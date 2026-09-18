@@ -60,6 +60,8 @@ class LiteralPredicate:
             raise ValueError(f"unsupported predicate op {self.op!r}")
         if not isinstance(self.value, _SCALAR):
             raise ValueError("predicate values must be JSON scalars")
+        if isinstance(self.value, float) and not math.isfinite(self.value):
+            raise ValueError("predicate values must be finite JSON scalars")
         if self.op in {"ge", "le"} and (isinstance(self.value, bool) or not isinstance(self.value, (int, float))):
             raise ValueError(f"{self.op} requires a numeric value")
 
@@ -68,8 +70,13 @@ class LiteralPredicate:
             return False
         actual = features[self.feature]
         if self.op == "eq":
+            # Typed guards must not accept 1 as a verified True flag.
+            if isinstance(actual, bool) != isinstance(self.value, bool):
+                return False
+            if not isinstance(actual, _SCALAR) or (isinstance(actual, float) and not math.isfinite(actual)):
+                return False
             return actual == self.value
-        if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)) or not math.isfinite(actual):
             return False
         if self.op == "ge":
             return float(actual) >= float(self.value)
@@ -354,6 +361,14 @@ def wilson_lower(successes: int, n: int, z: float = 1.959963984540054) -> float 
     return max(0.0, (centre - spread) / denom)
 
 
+def _same_output(a: Any, b: Any) -> bool:
+    """Compare typed JSON outputs, including nested Boolean values."""
+    try:
+        return json.dumps(a, sort_keys=True, allow_nan=False) == json.dumps(b, sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError):
+        return False
+
+
 def evaluate_rule(
     rows: Sequence[dict[str, Any]],
     *,
@@ -365,10 +380,10 @@ def evaluate_rule(
     sessions = {str(r.get("session_id") or "") for r in scoped if r.get("session_id")}
     matches = [r for r in scoped if rule.matches(dict(r.get("features") or {}))]
     matched_sessions = {str(r.get("session_id") or "") for r in matches if r.get("session_id")}
-    correct = sum(1 for r in matches if r.get("target") == output)
+    correct = sum(1 for r in matches if _same_output(r.get("target"), output))
     precision = correct / len(matches) if matches else None
     coverage = len(matches) / len(scoped) if scoped else 0.0
-    global_rows = [r for r in scoped if r.get("target") == output]
+    global_rows = [r for r in scoped if _same_output(r.get("target"), output)]
     global_prior = len(global_rows) / len(scoped) if scoped else None
     lift = (precision - global_prior) if precision is not None and global_prior is not None else None
     credit = lift_credit(successes=correct, n=len(matches), baseline=global_prior)
@@ -535,10 +550,18 @@ class RoutineRegistry:
         return tuple(self._candidates)
 
     def decide(self, capability_id: str, features: dict[str, Any]) -> RoutineDecision:
+        return self._decide(capability_id, features, shadow=False)
+
+    def decide_shadow(self, capability_id: str, features: dict[str, Any]) -> RoutineDecision:
+        """Advisory prediction only; never promotes a candidate or enables traffic."""
+        return self._decide(capability_id, features, shadow=True)
+
+    def _decide(self, capability_id: str, features: dict[str, Any], *, shadow: bool) -> RoutineDecision:
+        allowed = {"candidate", "credited", "promoted"} if shadow else {"promoted"}
         active = [
             c
             for c in self._candidates
-            if c.status == "promoted" and c.capability_id == capability_id
+            if c.status in allowed and c.capability_id == capability_id
         ]
         active.sort(
             key=lambda c: (
@@ -555,7 +578,7 @@ class RoutineRegistry:
                     output=candidate.output,
                     routine_id=candidate.routine_id,
                     capability_id=capability_id,
-                    reason="promoted_routine_match",
+                    reason="shadow_routine_match" if shadow else "promoted_routine_match",
                 )
         return RoutineDecision(matched=False, capability_id=capability_id)
 
