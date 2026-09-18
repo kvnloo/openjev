@@ -462,3 +462,110 @@ def needs_from_mapping(raw: dict[str, Any] | list[Any]) -> list[InformationNeed]
             )
         )
     return out
+
+
+def context_observation_event(
+    *,
+    packet: ContextPacket,
+    source_hash_hex: str,
+    revision: int,
+    trace_id: str | None = None,
+) -> dict[str, Any]:
+    """AODL ``stateUpdate`` carrying resolved context as observation (not a new event type)."""
+    if trace_id:
+        tid = trace_id
+    elif packet.task_id:
+        tid = packet.task_id
+    elif packet.recipe is not None:
+        tid = packet.recipe.request_signature
+    else:
+        tid = "ctx"
+    payload = {
+        "traceId": tid,
+        "kind": "context_resolve",
+        "evidenceCount": len(packet.evidence),
+        "unresolvedGaps": list(packet.unresolved_gaps),
+        "contradictions": list(packet.contradictions),
+        "recipeSignature": packet.recipe.request_signature if packet.recipe else None,
+        "evidence": [e.to_dict() for e in packet.evidence],
+        "measurements": dict(packet.measurements),
+        # Explicit: observation is not verified task success.
+        "execution_completed": False,
+        "verified_success": None,
+    }
+    digest = hashlib.blake2b(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8"),
+        digest_size=10,
+    ).hexdigest()
+    return {
+        "eventId": f"stateUpdate-ctx-{digest}",
+        "type": "stateUpdate",
+        "sourceHash": source_hash_hex,
+        "revision": int(revision),
+        "causalParents": [],
+        "payload": payload,
+    }
+
+
+def attach_context_to_aodl(
+    doc: dict[str, Any],
+    packet: ContextPacket,
+    *,
+    trace_id: str | None = None,
+) -> dict[str, Any]:
+    """Merge a context packet into an existing AODL document without new HOTL kinds.
+
+    - Does **not** rewrite intentGraph or provenance.sourceHash (intent stays stable).
+    - Writes runtime projection under ``provenance.runtimeContext`` and
+      ``constraints.context`` (open bags, not top-level intentContract).
+    - Appends a ``stateUpdate`` observation to eventLog.
+    - Never sets verified_success from resolve alone.
+    """
+    out = json.loads(json.dumps(doc))  # deep copy via json
+    sh = str(out.get("provenance", {}).get("sourceHash") or "")
+    if not sh:
+        raise ValueError("AODL document missing provenance.sourceHash")
+    rev = int(out.get("revision") or 0)
+    proj = packet.aodl_projection or project_to_aodl_fields(packet)
+
+    prov = out.setdefault("provenance", {})
+    # sourceHash unchanged — context is runtime observation, not intent material
+    prov["runtimeContext"] = {
+        "schema": SCHEMA,
+        "task_id": packet.task_id,
+        "recipe_signature": packet.recipe.request_signature if packet.recipe else None,
+        "attached_at": _now_iso(),
+        "source_epochs": dict(packet.recipe.source_epochs) if packet.recipe else {},
+    }
+
+    cons = out.setdefault("constraints", {})
+    cons["context"] = {
+        "unresolved_gaps": list(packet.unresolved_gaps),
+        "contradictions": list(packet.contradictions),
+        "evidence_count": len(packet.evidence),
+    }
+
+    # Plan binding for the resolver as strategy (not intent node)
+    plan = out.setdefault("plan", {})
+    bindings = plan.setdefault("bindings", {})
+    bindings["context-resolver"] = {
+        "runtime": "z0int.context_resolve",
+        "schema": SCHEMA,
+        "implementationStage": "context_resolve",
+        "allow_memory": bool(packet.measurements.get("allow_memory")),
+        "gpu_loaded": False,
+    }
+
+    event = context_observation_event(
+        packet=packet,
+        source_hash_hex=sh,
+        revision=rev,
+        trace_id=trace_id or packet.task_id,
+    )
+    out.setdefault("eventLog", []).append(event)
+
+    # Keep projection for consumers that read aodl_projection-style bags
+    out.setdefault("observation", {})
+    out["observation"]["context"] = proj
+    return out
+

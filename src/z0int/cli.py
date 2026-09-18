@@ -428,6 +428,30 @@ def build_parser() -> argparse.ArgumentParser:
     cxr.add_argument("--allow-memory", action="store_true")
     cxr.add_argument("--input", default=None, help="JSON file with needs[]")
 
+
+    tk = sub.add_parser("task", help="Authorized verified-loop task family (worktree + checkpoint)")
+    tk_sub = tk.add_subparsers(dest="task_cmd", required=True)
+    tka = tk_sub.add_parser("authorize", help="Authorize coding.bounded_worktree_patch checkpoint")
+    tka.add_argument("--repo", required=True)
+    tka.add_argument("--path", required=True, help="relative file to patch")
+    tka.add_argument("--find", required=True)
+    tka.add_argument("--replace", required=True)
+    tka.add_argument("--req", action="append", default=[], help="requirement path (repeatable)")
+    tka.add_argument("--task-id", default=None)
+    tka.add_argument("--json", action="store_true")
+    tkr = tk_sub.add_parser("run", help="Advance authorized task until verified (or --until)")
+    tkr.add_argument("--task-id", required=True)
+    tkr.add_argument("--until", default="verified", choices=["resolved", "worktree_ready", "patched", "verified"])
+    tkr.add_argument("--allow-qmd", action="store_true")
+    tkr.add_argument("--json", action="store_true")
+    tks = tk_sub.add_parser("status", help="Show task checkpoint")
+    tks.add_argument("--task-id", default=None)
+    tks.add_argument("--json", action="store_true")
+    tkf = tk_sub.add_parser("fixture", help="Create reference fixture repo + authorize + run")
+    tkf.add_argument("--dir", required=True, help="directory for fixture git repo")
+    tkf.add_argument("--task-id", default=None)
+    tkf.add_argument("--json", action="store_true")
+
     be = sub.add_parser("backends", help="DecisionBackend registry (list / doctor / eval)")
     be_sub = be.add_subparsers(dest="backends_cmd", required=True)
     bel = be_sub.add_parser("list", help="List registered backends (no model load)")
@@ -598,6 +622,62 @@ def _cmd_context(args: argparse.Namespace) -> int:
 
 
 
+def _cmd_task(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from z0int.task_loop import (
+        PatchSpec,
+        authorize_task,
+        list_checkpoints,
+        load_checkpoint,
+        make_fixture_repo,
+        resume_task,
+        run_until,
+        save_checkpoint,
+    )
+
+    def emit(obj: dict) -> None:
+        if getattr(args, "json", False) or True:
+            print(json.dumps(obj, indent=2, ensure_ascii=False, default=str))
+
+    cmd = args.task_cmd
+    if cmd == "status":
+        if args.task_id:
+            cp = load_checkpoint(args.task_id)
+            emit(cp.to_dict())
+        else:
+            emit({"tasks": list_checkpoints()})
+        return 0
+    if cmd == "authorize":
+        cp = authorize_task(
+            base_repo=args.repo,
+            patch=PatchSpec(relative_path=args.path, find=args.find, replace=args.replace),
+            requirement_paths=list(args.req or []),
+            task_id=args.task_id,
+        )
+        emit(cp.to_dict())
+        return 0
+    if cmd == "run":
+        cp = resume_task(args.task_id, until=args.until, allow_qmd=bool(getattr(args, "allow_qmd", False)))
+        emit(cp.to_dict())
+        # exit 0 always for data; verified flag is in payload
+        return 0 if cp.verified_success is not False or cp.status != "failed" else 1
+    if cmd == "fixture":
+        root, patch = make_fixture_repo(Path(args.dir))
+        cp = authorize_task(
+            base_repo=root,
+            patch=patch,
+            requirement_paths=["REQUIREMENT.md", "app.py"],
+            task_id=args.task_id,
+        )
+        cp = run_until(cp, until="verified", allow_qmd=False)
+        emit(cp.to_dict())
+        return 0 if cp.verified_success else 1
+    print(f"unknown task command: {cmd}", file=sys.stderr)
+    return 2
+
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
@@ -610,6 +690,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_status(as_json=as_json)
     if args.cmd == "context":
         return _cmd_context(args)
+    if args.cmd == "task":
+        return _cmd_task(args)
     if args.cmd == "backends":
         return _cmd_backends(args)
 

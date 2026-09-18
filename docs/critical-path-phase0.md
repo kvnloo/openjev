@@ -102,3 +102,24 @@ Recent decisions: `execution=log_only` on all sampled; route=`model`; providers 
 - Quota-group atomic reservation
 - Restart resume E2E
 - ABAB pilot timings
+
+
+## Verified loop slice (same branch)
+
+Family: `coding.bounded_worktree_patch`
+
+```bash
+z0int task fixture --dir /tmp/demo-repo --json
+z0int task status --task-id <id> --json
+z0int task run --task-id <id> --until verified --json
+```
+
+Pipeline: authorize → resolve_context (+ AODL attach) → git worktree → bounded patch → independent content verifier.
+
+Evidence split preserved:
+- after patch: `execution_completed=true`, `verified_success=null`
+- only verifier sets `verified_success`
+- base repo untouched; patch lives in worktree branch `z0int/<task_id>`
+
+AODL: `attach_context_to_aodl` keeps `provenance.sourceHash` stable; context is `stateUpdate` observation + `provenance.runtimeContext` + `constraints.context`. No live-flag flip.
+

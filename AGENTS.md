@@ -54,3 +54,9 @@ Product name **z0intelligence** (stochastic-parrot play; abundance under finite 
 - Primitive: `z0int.context_resolve.resolve_context` — provenance packet, not authorization.
 - Do not flip z0int-bridge `log_only` live without host consumption + verifier.
 - See `docs/critical-path-phase0.md`.
+
+## Verified task loop
+
+- Family `coding.bounded_worktree_patch`: `z0int task fixture|authorize|run|status`
+- Checkpoints: `$Z0INT_HOME/state/tasks/<id>.json` (default `~/.z0int`)
+- `execution_completed` ≠ `verified_success`
