@@ -246,6 +246,24 @@ def cmd_receipt_summary(*, as_json: bool) -> int:
     )
     return 0
 
+def cmd_receipt_scrub(*, as_json: bool, dry_run: bool) -> int:
+    from .receipt import scrub_contaminated_outcomes
+
+    s = scrub_contaminated_outcomes(dry_run=dry_run)
+    _print(
+        s,
+        as_json=as_json,
+        human=(
+            "z0int outcome scrub\n"
+            f"  scanned={s.get('scanned_joins')} unique={s.get('unique_traces')}\n"
+            f"  contaminated={s.get('contaminated_latest')} "
+            f"rewritten={s.get('rewritten')} dry_run={s.get('dry_run')}"
+        ),
+    )
+    return 0
+
+
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -360,6 +378,18 @@ def build_parser() -> argparse.ArgumentParser:
     rs = rc_sub.add_parser("summary", help="Tokenomics rollup from receipts + bridge")
     _json_flag(rs)
 
+    rscrub = rc_sub.add_parser(
+        "scrub",
+        help="Append corrections for false-gold outcomes (no verification signal)",
+    )
+    _json_flag(rscrub)
+    rscrub.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report contaminated rows without rewriting",
+    )
+
+
     cf = sub.add_parser(
         "counterfactual",
         help="Paired Grok reference cartography (historical mine + non-inferiority)",
@@ -421,6 +451,12 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_receipt_close(args=args)
         if args.receipt_cmd == "summary":
             return cmd_receipt_summary(as_json=as_json)
+        if args.receipt_cmd == "scrub":
+            return cmd_receipt_scrub(
+                as_json=as_json,
+                dry_run=bool(getattr(args, "dry_run", False)),
+            )
+
     if args.cmd == "counterfactual":
         from .counterfactual import cmd_mine, cmd_summary
 

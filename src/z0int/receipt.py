@@ -20,6 +20,31 @@ SCHEMA = "z0int.decision_receipt.v1"
 RECEIPTS_NAME = "decisions.jsonl"
 OUTCOMES_NAME = "outcomes.jsonl"
 
+# Ambient harness closes (OMP turn_end / agent_end). Old in-memory bridges still
+# pass success+tool_ok; those must never mint gold or inflate verified_tasks.
+AMBIENT_CLOSE_SOURCES = frozenset(
+    {
+        "bridge_turn_end",
+        "bridge_agent_end",
+        "bridge_agent_start",
+        "omp_turn_end",
+        "omp_agent_end",
+        "close_turn",
+    }
+)
+
+GOLD_SIGNALS = (
+    "verified_success",
+    "verified",
+    "test_pass",
+    "verifier_ok",
+    "pr_merged",
+    "task_done",
+)
+
+NEGATIVE_TRUE_SIGNALS = ("user_correction", "reverted", "ci_failed")
+
+
 
 def receipts_path(root: Path | None = None) -> Path:
     layout = paths.ensure_layout(root)
@@ -78,42 +103,99 @@ class Outcome:
           gold | negative | execution | soft
 
         Gold requires a *verification* signal, not mere turn completion.
+        Ambient harness closes without verification_source never mint gold
+        even if a stale bridge stamped test_pass/success.
         """
+        return normalize_outcome(self).raw_tier()
+
+    def raw_tier(self) -> str:
+        """Tier from fields as-is (no ambient sanitize). Prefer ``tier()``."""
         d = self.to_dict()
-        negative = any(
-            d.get(k) is True for k in ("user_correction", "reverted", "ci_failed")
-        ) or any(
-            d.get(k) is False
-            for k in (
-                "test_pass",
-                "verifier_ok",
-                "verified_success",
-                "verified",
-                "pr_merged",
-                "task_done",
-            )
+        negative = any(d.get(k) is True for k in NEGATIVE_TRUE_SIGNALS) or any(
+            d.get(k) is False for k in GOLD_SIGNALS
         )
         if negative:
             return "negative"
-        gold = any(
-            d.get(k) is True
-            for k in (
-                "verified_success",
-                "verified",
-                "test_pass",
-                "verifier_ok",
-                "pr_merged",
-                "task_done",
-            )
-        )
+        gold = any(d.get(k) is True for k in GOLD_SIGNALS)
         if gold:
             return "gold"
         if d.get("execution_completed") is True:
             return "execution"
-        # bare success / tool_ok are soft evidence only
         if d.get("success") is True or d.get("tool_ok") is True:
             return "soft"
         return "soft"
+
+    def is_verified(self) -> bool:
+        """True only when a verification signal supports quality learning."""
+        return self.tier() == "gold"
+
+
+def _outcome_from_mapping(outcome: Outcome | dict[str, Any]) -> Outcome:
+    if isinstance(outcome, Outcome):
+        return outcome
+    fields = Outcome.__dataclass_fields__
+    return Outcome(**{k: v for k, v in outcome.items() if k in fields})
+
+
+def is_ambient_close_source(source: str | None) -> bool:
+    if not source:
+        return False
+    s = str(source)
+    if s in AMBIENT_CLOSE_SOURCES:
+        return True
+    # automatic bridge_* closes except explicit operator markers
+    if s.startswith("bridge_") and s not in {"bridge_manual", "bridge_verified"}:
+        return True
+    return False
+
+
+def normalize_outcome(outcome: Outcome | dict[str, Any]) -> Outcome:
+    """Demote stale ambient closes so they cannot contaminate gold.
+
+    Old OMP processes bind an older z0int-bridge that still closes with
+    ``success=true tool_ok=true`` (and sometimes ``test_pass=true``).
+    Python is the shared write path those processes still call — sanitize
+    here so tip and stale hosts agree.
+
+    Rules:
+    - verification_source set → trust gold signals (async CI/join/operator).
+    - ambient source without verification_source → strip gold claims;
+      force execution_completed so bare success/tool_ok become ``execution``.
+    - non-ambient success/tool_ok alone stay ``soft`` (probes, legacy).
+    """
+    oc = _outcome_from_mapping(outcome)
+    d = oc.to_dict()
+    src = d.get("source")
+    has_vsrc = bool(d.get("verification_source"))
+    if is_ambient_close_source(src if isinstance(src, str) else None) and not has_vsrc:
+        for k in GOLD_SIGNALS:
+            if getattr(oc, k, None) is True:
+                setattr(oc, k, None)
+        if oc.execution_completed is not False:
+            oc.execution_completed = True
+        if oc.note is None:
+            oc.note = "ambient_close_sanitized"
+        else:
+            note = str(oc.note)
+            if "ambient_close_sanitized" not in note:
+                oc.note = note + "|ambient_close_sanitized"
+    return oc
+
+
+def effective_tier(
+    outcome: Outcome | dict[str, Any] | None,
+    *,
+    stored_tier: str | None = None,
+) -> str | None:
+    """Recompute tier from outcome fields; never trust a stale stored gold label."""
+    if outcome is None and not stored_tier:
+        return None
+    if outcome is None:
+        if stored_tier == "gold":
+            return "soft"
+        return stored_tier
+    return normalize_outcome(outcome).raw_tier()
+
 
     def is_verified(self) -> bool:
         """True only when a verification signal supports quality learning."""
@@ -360,11 +442,9 @@ def join_outcome(
 ) -> dict[str, Any] | None:
     """Attach world outcome to a prior decision; append gold/negative to outcomes.jsonl."""
     base = find_receipt(trace_id, root=root)
-    oc = outcome if isinstance(outcome, Outcome) else Outcome(**{
-        k: v for k, v in outcome.items() if k in Outcome.__dataclass_fields__
-    })
+    oc = normalize_outcome(outcome)
     oc_dict = oc.to_dict()
-    tier = oc.tier()
+    tier = oc.raw_tier()
     joined = {
         "schema": "z0int.outcome_join.v1",
         "ts": time.time(),
@@ -387,6 +467,8 @@ def join_outcome(
         updated["schema"] = SCHEMA
         append_receipt(updated, root=root)
     return joined
+
+
 
 
 
@@ -466,11 +548,9 @@ def close_turn(
 def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict[str, Any]:
     """Aggregate estimated + measured frontier-token economics.
 
-    ``frontier_tokens_avoided_est`` — counterfactual from preflight/baselines.
-    ``baseline_tokens_sum`` — sum of baseline_in+baseline_out when present.
-    ``measured_frontier_tokens_sum`` — actual post-turn frontier tokens when joined.
-    ``actual_tokens_saved`` — max(0, baseline − measured) over rows with both.
-    ``tokens_per_verified_task`` — tokens attributed to verified gold outcomes.
+    Verified counts always re-derive from outcome *fields* via
+    ``normalize_outcome``; a stored ``outcome_tier=gold`` without
+    verification signals does not count.
     """
     rows = 0
     avoided = 0
@@ -481,7 +561,9 @@ def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict
     with_outcome = 0
     verified = 0
     verified_tokens = 0
+    false_gold_ignored = 0
     by_cap: dict[str, int] = {}
+    by_tier: dict[str, int] = {}
     paths_home = paths.home() if root is None else root
     candidates = [
         receipts_path(root),
@@ -520,41 +602,22 @@ def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict
                 rows_with_both += 1
                 actual_saved += max(0, base_tot - meas_i)
             outcome = rec.get("outcome") or row.get("outcome")
-            tier = rec.get("outcome_tier") or row.get("outcome_tier")
-            if outcome or tier:
+            stored_tier = rec.get("outcome_tier") or row.get("outcome_tier")
+            if outcome or stored_tier:
                 with_outcome += 1
-                is_v = False
+                tier = effective_tier(
+                    outcome if isinstance(outcome, dict) else None,
+                    stored_tier=stored_tier if isinstance(stored_tier, str) else None,
+                )
+                if stored_tier == "gold" and tier != "gold":
+                    false_gold_ignored += 1
+                if tier:
+                    by_tier[tier] = by_tier.get(tier, 0) + 1
                 if tier == "gold":
-                    is_v = True
-                elif isinstance(outcome, dict):
-                    # Never treat bare success/tool_ok as verified.
-                    is_v = any(
-                        outcome.get(k) is True
-                        for k in (
-                            "verified_success",
-                            "verified",
-                            "test_pass",
-                            "verifier_ok",
-                            "pr_merged",
-                            "task_done",
-                        )
-                    ) and not any(
-                        outcome.get(k) is True
-                        for k in ("user_correction", "reverted", "ci_failed")
-                    ) and not any(
-                        outcome.get(k) is False
-                        for k in (
-                            "test_pass",
-                            "verifier_ok",
-                            "verified_success",
-                            "verified",
-                            "pr_merged",
-                            "task_done",
-                        )
-                    )
-                if is_v:
                     verified += 1
-                    tok = meas_i if meas_i is not None else (base_tot if base_tot is not None else None)
+                    tok = meas_i if meas_i is not None else (
+                        base_tot if base_tot is not None else None
+                    )
                     if tok is None and av is not None:
                         try:
                             tok = int(av)
@@ -576,5 +639,92 @@ def summarize_tokenomics(*, root: Path | None = None, limit: int = 5000) -> dict
         "rows_with_outcome": with_outcome,
         "verified_tasks": verified,
         "tokens_per_verified_task": t_per_v,
+        "false_gold_ignored": false_gold_ignored,
+        "by_tier": by_tier,
         "by_capability": by_cap,
     }
+
+
+def scrub_contaminated_outcomes(
+    *,
+    root: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Append corrected joins for rows whose stored gold lacks verification.
+
+    Append-only: original contaminated lines stay for audit; latest join wins
+    for consumers that take the last row per trace_id.
+    """
+    op = outcomes_path(root)
+    scanned = 0
+    contaminated = 0
+    rewritten = 0
+    corrections: list[dict[str, Any]] = []
+    latest: dict[str, dict[str, Any]] = {}
+    for row in _iter_jsonl(op) or []:
+        scanned += 1
+        tid = row.get("trace_id")
+        if isinstance(tid, str) and tid:
+            latest[tid] = row
+    for tid, row in latest.items():
+        stored = row.get("outcome_tier")
+        oc = row.get("outcome") if isinstance(row.get("outcome"), dict) else {}
+        tier = effective_tier(
+            oc, stored_tier=stored if isinstance(stored, str) else None
+        )
+        if stored == "gold" and tier != "gold":
+            contaminated += 1
+            fixed_oc = normalize_outcome(oc).to_dict()
+            if tier == "soft" and is_ambient_close_source(fixed_oc.get("source")):
+                fixed_oc["execution_completed"] = True
+                tier = "execution"
+            correction = {
+                "schema": "z0int.outcome_join.v1",
+                "ts": time.time(),
+                "trace_id": tid,
+                "outcome": fixed_oc,
+                "outcome_tier": tier,
+                "receipt": row.get("receipt"),
+                "scrubbed_from_tier": stored,
+                "scrub_reason": "false_gold_no_verification_signal",
+                "scrubbed_from_ts": row.get("ts"),
+            }
+            corrections.append(correction)
+    if not dry_run and corrections:
+        op.parent.mkdir(parents=True, exist_ok=True)
+        with op.open("a", encoding="utf-8") as fh:
+            for c in corrections:
+                fh.write(json.dumps(c, default=str) + "\n")
+                rewritten += 1
+                base = (
+                    c.get("receipt")
+                    if isinstance(c.get("receipt"), dict)
+                    else find_receipt(c["trace_id"], root=root)
+                )
+                if isinstance(base, dict):
+                    updated = dict(base)
+                    updated["outcome"] = c["outcome"]
+                    updated["outcome_tier"] = c["outcome_tier"]
+                    updated["outcome_ts"] = c["ts"]
+                    updated["scrubbed_from_tier"] = c["scrubbed_from_tier"]
+                    updated["schema"] = SCHEMA
+                    append_receipt(updated, root=root)
+    return {
+        "schema": "z0int.outcome_scrub.v1",
+        "ok": True,
+        "dry_run": dry_run,
+        "scanned_joins": scanned,
+        "unique_traces": len(latest),
+        "contaminated_latest": contaminated,
+        "rewritten": rewritten if not dry_run else 0,
+        "would_rewrite": contaminated if dry_run else rewritten,
+        "corrections": [
+            {
+                "trace_id": c["trace_id"],
+                "from": c.get("scrubbed_from_tier"),
+                "to": c.get("outcome_tier"),
+            }
+            for c in corrections
+        ],
+    }
+

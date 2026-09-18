@@ -60,6 +60,42 @@ class OutcomeTiers(unittest.TestCase):
             "negative",
         )
 
+    def test_stale_ambient_success_is_execution_not_gold(self):
+        from z0int.receipt import Outcome
+
+        # Old bridge closeFromMessages: success+toolOk on turn_end
+        self.assertEqual(
+            Outcome(success=True, tool_ok=True, source="bridge_turn_end").tier(),
+            "execution",
+        )
+        self.assertFalse(
+            Outcome(success=True, tool_ok=True, source="bridge_turn_end").is_verified()
+        )
+
+    def test_ambient_test_pass_without_verification_source_demoted(self):
+        from z0int.receipt import Outcome
+
+        # Stale /z0int-close defaulted testPass=success on ambient-like paths;
+        # automatic bridge closes must not mint gold without verification_source.
+        self.assertEqual(
+            Outcome(test_pass=True, success=True, tool_ok=True, source="bridge_turn_end").tier(),
+            "execution",
+        )
+
+    def test_ambient_gold_allowed_with_verification_source(self):
+        from z0int.receipt import Outcome
+
+        self.assertEqual(
+            Outcome(
+                test_pass=True,
+                source="bridge_turn_end",
+                verification_source="ci",
+            ).tier(),
+            "gold",
+        )
+
+
+
 
 class ReceiptJoin(unittest.TestCase):
     def test_emit_join_summary_gold_from_test_pass(self):
@@ -148,6 +184,89 @@ class ReceiptJoin(unittest.TestCase):
             )
             s = summarize_tokenomics(root=home)
             self.assertEqual(s["verified_tasks"], 0)
+
+    def test_false_stored_gold_ignored_in_summary(self):
+        from z0int.receipt import append_receipt, build_receipt, summarize_tokenomics
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            r = append_receipt(
+                build_receipt(
+                    capability_id="coding.edit",
+                    route="model",
+                    baseline_input_tokens=1000,
+                    baseline_output_tokens=100,
+                ),
+                root=home,
+            )
+            # Contaminated historical shape: tier=gold, only success/tool_ok
+            bad = dict(r)
+            bad["outcome"] = {
+                "success": True,
+                "tool_ok": True,
+                "source": "bridge_turn_end",
+            }
+            bad["outcome_tier"] = "gold"
+            bad["measured_frontier_tokens"] = 50
+            append_receipt(bad, root=home)
+            s = summarize_tokenomics(root=home)
+            self.assertEqual(s["verified_tasks"], 0)
+            self.assertGreaterEqual(s["false_gold_ignored"], 1)
+
+    def test_scrub_rewrites_false_gold(self):
+        from z0int.receipt import (
+            append_receipt,
+            build_receipt,
+            join_outcome,
+            scrub_contaminated_outcomes,
+            summarize_tokenomics,
+            Outcome,
+        )
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            r = append_receipt(
+                build_receipt(capability_id="coding.edit", route="model"),
+                root=home,
+            )
+            tid = r["trace_id"]
+            # Bypass normalize by writing raw contaminated join (historical)
+            op = home / "receipts" / "outcomes.jsonl"
+            op.parent.mkdir(parents=True, exist_ok=True)
+            with op.open("a", encoding="utf-8") as fh:
+                fh.write(
+                    json.dumps(
+                        {
+                            "schema": "z0int.outcome_join.v1",
+                            "ts": 1.0,
+                            "trace_id": tid,
+                            "outcome": {
+                                "success": True,
+                                "tool_ok": True,
+                                "source": "bridge_turn_end",
+                            },
+                            "outcome_tier": "gold",
+                            "receipt": r,
+                        }
+                    )
+                    + "\n"
+                )
+            dry = scrub_contaminated_outcomes(root=home, dry_run=True)
+            self.assertEqual(dry["contaminated_latest"], 1)
+            self.assertEqual(dry["rewritten"], 0)
+            live = scrub_contaminated_outcomes(root=home, dry_run=False)
+            self.assertEqual(live["rewritten"], 1)
+            self.assertEqual(live["corrections"][0]["to"], "execution")
+            # second scrub is no-op on latest
+            again = scrub_contaminated_outcomes(root=home, dry_run=True)
+            self.assertEqual(again["contaminated_latest"], 0)
+            # real gold still joins
+            join_outcome(tid, Outcome(test_pass=True, source="ci"), root=home)
+            s = summarize_tokenomics(root=home)
+            self.assertGreaterEqual(s["verified_tasks"], 1)
+
+
 
 
 class ReceiptCli(unittest.TestCase):
