@@ -24,6 +24,7 @@ SCHEMA_SHADOW = "os.next_context.v0"
 SCHEMA_OPERATOR = "os.next_operator.v0"
 SCHEMA_RECEIPT = "flow_prediction.v1"
 SCHEMA_HORIZON = "flow_horizon.v1"
+SCHEMA_ROUTINE = "os.routine_candidate.v0"
 
 OPERATOR_FAMILIES = (
     "inspect_result",
@@ -218,6 +219,17 @@ def import_from_db(
     finally:
         conn.close()
 
+    # Routine candidates (mined by workspace-copilot; z0int owns promotion later)
+    rt_src = layout["episodes"] / "os_routine_candidates.jsonl"
+    n_rt = 0
+    if rt_src.is_file():
+        n_rt = sum(1 for line in rt_src.read_text(encoding="utf-8").splitlines() if line.strip())
+    manifest_routines = {
+        "path": str(rt_src) if rt_src.is_file() else None,
+        "n": n_rt,
+        "schema": SCHEMA_ROUTINE,
+    }
+
     manifest = {
         "schema": "z0int.os_context_import.v1",
         "db": str(db_path),
@@ -238,6 +250,7 @@ def import_from_db(
         "operator_families": list(OPERATOR_FAMILIES),
         "operator_schema": SCHEMA_OPERATOR,
         "receipt_schema": SCHEMA_RECEIPT,
+        "routines": manifest_routines,
     }
     man_path = layout["episodes"] / "os_next_context_manifest.json"
     man_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
